@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Match the "Customers" collection
+    match /customers/{serialNo} {
+      // Allow read and write access for authenticated users
+      allow read, write: if request.auth != null;
+    }
+  }
+}
