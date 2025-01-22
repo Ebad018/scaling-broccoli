@@ -232,4 +232,31 @@ exports.getCustomerData = functions.https.onRequest(async (req, res) => {
   }
 });
 
+exports.updateTabData = functions.https.onRequest(async (req, res) => {
+  const collectionName = req.body.collection || 'TabData'; // Collection name
+  const tabId = req.body.tabId; // Tab ID to update
+  const newContent = req.body.content; // New content to update
+  
+  try {
+    await admin.firestore().collection(collectionName).doc(tabId).update({ content: newContent });
+    res.status(200).send({ message: 'Tab updated successfully' });
+  } catch (error) {
+    res.status(500).send({ message: 'Error updating data', error });
+  }
+});
 
+exports.getTabData = functions.https.onRequest(async (req, res) => {
+  const collectionName = req.query.collection || 'TabData'; // Collection name passed via query params
+  const tabId = req.query.tabId; // Specific tab ID to fetch
+
+  try {
+    const snapshot = await admin.firestore().collection(collectionName).doc(tabId).get();
+    if (snapshot.exists) {
+      res.status(200).send(snapshot.data());
+    } else {
+      res.status(404).send({ message: 'Tab not found' });
+    }
+  } catch (error) {
+    res.status(500).send({ message: 'Error fetching data', error });
+  }
+});
