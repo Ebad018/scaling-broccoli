@@ -234,30 +234,33 @@ exports.getCustomerData = functions.https.onRequest(async (req, res) => {
 });
 
 exports.updateTabData = functions.https.onRequest(async (req, res) => {
-  const collectionName = req.body.collection || 'TabData'; // Collection name
+  const collectionName = req.body.collection || "TabData"; // Collection name
   const tabId = req.body.tabId; // Tab ID to update
   const newContent = req.body.content; // New content to update
-  
+
   try {
-    await admin.firestore().collection(collectionName).doc(tabId).update({ content: newContent });
-    res.status(200).send({ message: 'Tab updated successfully' });
+    await admin.firestore().collection(collectionName)
+        .doc(tabId).update({content: newContent});
+    res.status(200).send({message: "Tab updated successfully"});
   } catch (error) {
-    res.status(500).send({ message: 'Error updating data', error });
+    res.status(500).send({message: "Error updating data", error});
   }
 });
 
 exports.getTabData = functions.https.onRequest(async (req, res) => {
-  const collectionName = req.query.collection || 'Customers'; // Collection name passed via query params
+  const collectionName = req.query
+      .collection || "Customers"; // Collection name passed via query params
   const tabId = req.query.tabId; // Specific tab ID to fetch
 
   try {
-    const snapshot = await admin.firestore().collection(collectionName).doc(tabId).get();
-    const customers = snapshot.docs.map(doc => ({
+    const snapshot = await admin.firestore()
+        .collection(collectionName).doc(tabId).get();
+    const customers = snapshot.docs.map((doc) => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
     }));
     res.status(200).send(customers);
-    } catch (error) {
-    res.status(500).send({ message: 'Error fetching data', error });
+  } catch (error) {
+    res.status(500).send({message: "Error fetching data", error});
   }
 });

@@ -1,8 +1,10 @@
 {
   "devDependencies": {
-    "eslint": "^8.20.0"
+    "eslint": "^8.20.0",
+    "eslint-config-google": "^0.14.0"
   },
   "dependencies": {
+    "firebase-admin": "^13.0.2",
     "git": "^0.1.5"
   }
 }
