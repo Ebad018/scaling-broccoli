@@ -1,5 +1,6 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+const cors = require("cors")({origin: true});
 
 // Initialize Firebase Admin SDK
 admin.initializeApp();
@@ -247,20 +248,29 @@ exports.updateTabData = functions.https.onRequest(async (req, res) => {
   }
 });
 
-exports.getTabData = functions.https.onRequest(async (req, res) => {
-  const collectionName = req.query
-      .collection || "Customers"; // Collection name passed via query params
-  const tabId = req.query.tabId; // Specific tab ID to fetch
+exports.getCustomersData = functions.https.onRequest(async (req, res) => {
+  cors(req, res, async () => {
+    try {
+      const snapshot = await admin.firestore()
+          .collection("Customers").orderBy("createdAt").get();
 
-  try {
-    const snapshot = await admin.firestore()
-        .collection(collectionName).doc(tabId).get();
-    const customers = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    res.status(200).send(customers);
-  } catch (error) {
-    res.status(500).send({message: "Error fetching data", error});
-  }
+      const customers = snapshot.docs.map((doc) => {
+        return {
+          id: doc.id,
+          firstname: doc.data().firstname,
+          lastname: doc.data().lastname,
+          phone: doc.data().phone,
+          email: doc.data().email,
+          address: doc.data().address,
+          city: doc.data().city,
+          createdAt: doc.data().createdAt.toDate(),
+        };
+      });
+
+      res.status(200).send(customers);
+    } catch (error) {
+      console.error("Error retrieving customer data:", error);
+      res.status(500).send({error: "Unable to retrieve customer data"});
+    }
+  });
 });
