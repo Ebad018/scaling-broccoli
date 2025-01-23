@@ -192,6 +192,7 @@ exports.getComplaints = functions.https.onRequest(async (req, res) => {
     res.status(500).send("Failed to retrieve complaints.");
   }
 });
+
 exports.getCustomerData = functions.https.onRequest(async (req, res) => {
   let {phone} = req.query;
 
@@ -246,17 +247,17 @@ exports.updateTabData = functions.https.onRequest(async (req, res) => {
 });
 
 exports.getTabData = functions.https.onRequest(async (req, res) => {
-  const collectionName = req.query.collection || 'TabData'; // Collection name passed via query params
+  const collectionName = req.query.collection || 'Customers'; // Collection name passed via query params
   const tabId = req.query.tabId; // Specific tab ID to fetch
 
   try {
     const snapshot = await admin.firestore().collection(collectionName).doc(tabId).get();
-    if (snapshot.exists) {
-      res.status(200).send(snapshot.data());
-    } else {
-      res.status(404).send({ message: 'Tab not found' });
-    }
-  } catch (error) {
+    const customers = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    res.status(200).send(customers);
+    } catch (error) {
     res.status(500).send({ message: 'Error fetching data', error });
   }
 });
