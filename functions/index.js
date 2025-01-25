@@ -274,3 +274,84 @@ exports.getCustomersData = functions.https.onRequest(async (req, res) => {
     }
   });
 });
+
+// Update customer data
+exports.updateCustomerData = functions.https.onRequest(async (req, res) => {
+  try {
+    const customerData = req.body;
+    const customerId = customerData.id;
+
+    // Update the Firestore document with the new data
+    await admin.firestore().collection("Customers").doc(customerId).update({
+      firstname: customerData.firstname,
+      lastname: customerData.lastname,
+      phone: customerData.phone,
+      email: customerData.email,
+      address: customerData.address,
+      city: customerData.city,
+      createdAt: admin.firestore.Timestamp
+          .fromDate(new Date(customerData.createdAt)), // Keep original date
+    });
+
+    res.status(200).send({success: true});
+  } catch (error) {
+    console.error("Error updating customer data:", error);
+    res.status(500).send({error: "Unable to update customer data"});
+  }
+});
+
+
+exports.getAllCustomerWarranties = functions
+    .https.onRequest(async (req, res) => {
+      cors(req, res, async () => {
+        try {
+          const customersSnapshot = await admin.firestore()
+              .collection("Customers").get();
+
+          const customersWithWarranties = [];
+
+          // Loop through each customer document
+          for (const customerDoc of customersSnapshot.docs) {
+            const customerData = customerDoc.data();
+
+            // Fetch warranties for each customer
+            const warrantiesSnapshot = await admin.firestore()
+                .collection("Customers")
+                .doc(customerDoc.id)
+                .collection("Warranties")
+                .get();
+
+            const warranties = warrantiesSnapshot.docs.map((warrantyDoc) => {
+              const warrantyData = warrantyDoc.data();
+
+              // Convert Firestore timestamps to JavaScript Date objects
+              const startdate = warrantyData
+                  .startdate.toDate(); // Convert Firestore timestamp to Date
+
+              return {
+                id: warrantyDoc.id,
+                ...warrantyData,
+                startdate: startdate
+                    .toLocaleDateString(),
+                // Format Date as readable string (e.g., "MM/DD/YYYY")
+              };
+            });
+
+            // Add customer data along with warranties
+            customersWithWarranties.push({
+              id: customerDoc.id,
+              ...customerData,
+              warranties: warranties,
+            });
+          }
+
+          // Send response with all customers and their warranties
+          res.status(200).send(customersWithWarranties);
+        } catch (error) {
+          console.error("Error retrieving customer warranties:", error);
+          res.status(500)
+              .send({error: "Unable to retrieve customer warranties"});
+        }
+      });
+    });
+
