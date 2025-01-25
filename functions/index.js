@@ -6,11 +6,10 @@ const cors = require("cors")({origin: true});
 admin.initializeApp();
 
 const db = admin.firestore();
-
-// Cloud Function for handling Twilio Webhook and checking customer details
+// Cloud Function for handling Twilio Webhook and sending automated responses
 exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
   const incomingPhone = req.body.From; // Phone number from Twilio
-  const messageBody = req.body.Body; // Message content
+  const messageBody = req.body.Body.trim(); // Message content
 
   try {
     // Search for a customer with the incoming phone number
@@ -19,24 +18,31 @@ exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
         .where("phone", "==", incomingPhone)
         .get();
 
+    // Respond with a welcome message and menu options
+    const responseMessage = `
+  Hello! Welcome to Sabro Customer Service. What may I help you with?
+
+  Please reply with the highlighted word or option number:
+
+  1 for Product Warranty
+  2 for a Complaint
+  3 for Registration
+  4 for Update on your Order
+  5 to talk to an Agent
+`;
+
 
     if (customerQuery.empty) {
       // No matching customer found
       console.log(`No Customer found for phone number: ${incomingPhone}`);
 
-      // Respond back to Twilio
-      res.set(
-          "Content-Type",
-          "text/xml",
-      );
-
+      // Respond back to Twilio with the menu
+      res.set("Content-Type", "text/xml");
       res.send(`
-  <Response>
-    <Message>
-      Message received and linked to your profile. Thank you!
-    </Message>
-  </Response>
-`);
+        <Response>
+          <Message>${responseMessage}</Message>
+        </Response>
+      `);
     } else {
       // Matching customer found
       const customerDoc = customerQuery.docs[0];
@@ -52,18 +58,15 @@ exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
           });
 
-
       console.log(
           `Message from ${incomingPhone} linked to customer ID: ${customerId}`,
       );
 
-
-      // Respond back to Twilio
+      // Respond with the automated message and menu options
       res.set("Content-Type", "text/xml");
       res.send(`
         <Response>
-          <Message>Message received and linked to 
-          your profile. Thank you!</Message>
+          <Message>${responseMessage}</Message>
         </Response>
       `);
     }
