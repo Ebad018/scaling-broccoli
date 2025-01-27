@@ -358,3 +358,142 @@ exports.getAllCustomerWarranties = functions
       });
     });
 
+exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      // Check if request is POST
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed");
+      }
+
+      // Parse incoming data
+      const {firstname, lastname, phone, email,
+        startdate, devicedetails} = req.body;
+
+      // Check if all required fields are provided
+      if (!firstname || !lastname || !phone ||
+         !email || !startdate || !devicedetails) {
+        return res.status(400).send("Missing required fields");
+      }
+
+      // Check if the 'Customers' collection
+      //  contains a document with the provided email
+      const customerDocRef = admin.firestore()
+          .collection("Customers").where("email", "==", email);
+      const customerSnapshot = await customerDocRef.get();
+
+      if (!customerSnapshot.empty) {
+        // Document with email exists, work with the first match
+        const customerDoc = customerSnapshot.docs[0];
+        const customerId = customerDoc.id; // Get customer document ID
+
+        // Generate a dynamic Warranty document ID
+        const currentYear = new Date().getFullYear();
+        const warrantyId = `${currentYear}SAB-000${generateUniqueId()}`;
+
+        // Calculate the ending date (1 year after start date)
+        const startDateObject = new Date(startdate);
+        const endingDate = new Date(startDateObject
+            .setFullYear(startDateObject.getFullYear() + 1));
+
+        // Create a new 'Warranties' subcollection underthe 'Customers' document
+        const warrantyDocRef = admin.firestore()
+            .collection("Customers")
+            .doc(customerId)
+            .collection("Warranties")
+            .doc(warrantyId);
+
+        // Add warranty data to Firestore
+        await warrantyDocRef.set({
+          firstname,
+          lastname,
+          phone,
+          email,
+          startdate: startDateObject,
+          endingdate: endingDate,
+          devicedetails,
+        });
+
+        return res.status(200)
+            .send({status: "success", message: "Warranty document created"});
+      } else {
+        return res.status(404).send({status: "error",
+          message: "Customer not found"});
+      }
+    } catch (error) {
+      console.error("Error processing the form:", error);
+      return res.status(500).send({status: "error",
+        message: "Internal Server Error"});
+    }
+  });
+});
+
+// Helper function to generate unique number for the warranty ID
+/**
+ * Generates a unique 4-digit number.
+ * @return {number} A unique 4-digit number.
+ */
+function generateUniqueId() {
+  return Math.floor(1000 + Math.random() * 9000); // Generate a number
+}
+
+exports.getAllCustomerComplaints = functions
+    .https.onRequest(async (req, res) => {
+      cors(req, res, async () => {
+        try {
+          const customersSnapshot = await admin.firestore()
+              .collection("Customers").get();
+
+          const customersWithComplaints = [];
+
+          // Loop through each customer document
+          for (const customerDoc of customersSnapshot.docs) {
+            const customerData = customerDoc.data();
+
+            // Fetch complaints for each customer
+            const complaintsSnapshot = await admin.firestore()
+                .collection("Customers")
+                .doc(customerDoc.id)
+                .collection("Complaints")
+                .get();
+
+            const complaints = complaintsSnapshot.docs.map((complaintDoc) => {
+              const complaintData = complaintDoc.data();
+
+              // Convert Firestore timestamps to JavaScript Date objects
+              const complaintDate = complaintData.complaintdate.toDate();
+              // Convert 'date' timestamp to Date
+              let closingDate = null;
+
+              if (complaintData.closingdate) {
+                closingDate = complaintData.closingdate.toDate();
+                // Convert 'closingdate' timestamp to Date if it exists
+              }
+
+              return {
+                id: complaintDoc.id,
+                ...complaintData,
+                complaintdate: complaintDate.toLocaleDateString(),
+                // Format 'date' as readable string
+                closingdate: closingDate ?
+                closingDate.toLocaleDateString(): null,
+              };
+            });
+
+            // Add customer data along with complaints
+            customersWithComplaints.push({
+              id: customerDoc.id,
+              ...customerData,
+              complaints: complaints,
+            });
+          }
+
+          // Send response with all customers and their complaints
+          res.status(200).send(customersWithComplaints);
+        } catch (error) {
+          console.error("Error retrieving customer complaints:", error);
+          res.status(500)
+              .send({error: "Unable to retrieve customer complaints"});
+        }
+      });
+    });
