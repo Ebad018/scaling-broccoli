@@ -159,7 +159,8 @@ exports.registerUser = functions.https.onRequest(async (req, res) => {
     res.status(500).send("Failed to register user.");
   }
 });
-exports.updateComplaintStatus = functions.https.onRequest(async (req, res) => {
+/* exports.updateComplaintStatus = functions.https.
+onRequest(async (req, res) => {
   const {complaintId, status} = req.body;
 
   try {
@@ -195,7 +196,7 @@ exports.getComplaints = functions.https.onRequest(async (req, res) => {
     console.error("Error retrieving complaints:", error);
     res.status(500).send("Failed to retrieve complaints.");
   }
-});
+}); */
 
 exports.getCustomerData = functions.https.onRequest(async (req, res) => {
   let {phone} = req.query;
@@ -497,3 +498,50 @@ exports.getAllCustomerComplaints = functions
         }
       });
     });
+
+exports.updateComplaintStatus = functions.https.onRequest(async (req, res) => {
+  try {
+    const complaintData = req.body;
+    const customerId = complaintData.customerId; // ID of the customer document
+    const complaintId = complaintData.complaintId; // ID of the complaint docume
+
+    // Reference to the customer's document
+    const customerDocRef = admin.firestore()
+        .collection("Customers").doc(customerId);
+
+    // Check if the customer document exists
+    const customerDoc = await customerDocRef.get();
+    if (!customerDoc.exists) {
+      return res.status(404).send({error: "Customer document not found."});
+    }
+
+    // Reference to the complaint document inside the Complaints sub-collection
+    const complaintDocRef = customerDocRef.collection("Complaints")
+        .doc(complaintId);
+
+    // Check if the complaint document exists
+    const complaintDoc = await complaintDocRef.get();
+    if (!complaintDoc.exists) {
+      return res.status(404).send({error: "Complaint document not found."});
+    }
+
+    // Proceed with the update
+    await complaintDocRef.update({
+      firstname: complaintData.firstname,
+      lastname: complaintData.lastname,
+      phone: complaintData.phone,
+      address: complaintData.address,
+      city: complaintData.city,
+      complaintdate: admin.firestore.Timestamp
+          .fromDate(new Date(complaintData.complaintdate)),
+      complaint: complaintData.complaint,
+      complaintstatus: complaintData.complaintstatus,
+      closingdate: complaintData.closingdate,
+    });
+
+    res.status(200).send({success: true});
+  } catch (error) {
+    console.error("Error updating complaint data:", error);
+    res.status(500).send({error: "Unable to update complaint data"});
+  }
+});
