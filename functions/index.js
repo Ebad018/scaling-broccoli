@@ -4,8 +4,13 @@ const cors = require("cors")({origin: true});
 
 // Initialize Firebase Admin SDK
 admin.initializeApp();
-
 const db = admin.firestore();
+
+
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// CLOUD FUNCTION FOR TWILIO
 // Cloud Function for handling Twilio Webhook and sending automated responses
 exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
   const incomingPhone = req.body.From; // Phone number from Twilio
@@ -76,127 +81,6 @@ exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// Existing Cloud Function for adding a new customer
-exports.addCustomer = functions.https.onRequest(async (req, res) => {
-  const {firstname, lastname, email, phone, address, city} = req.body;
-
-  // Validate required fields
-  if (!firstname || !lastname || !email || !phone || !address || !city) {
-    res.status(400).send("Missing required fields");
-    return;
-  }
-
-  try {
-    // Auto-generate a serialNo using Firestore's auto-ID
-    const customerRef = await db.collection("Customers").add({
-      firstname,
-      lastname,
-      email,
-      phone,
-      address,
-      city,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    console.log("Customer added with ID:", customerRef.id);
-
-    res.status(200).send({
-      message: "Customer added successfully!",
-      serialNo: customerRef.id, // Return the generated serialNo (document ID)
-    });
-  } catch (error) {
-    console.error("Error adding customer:", error);
-    res.status(500).send("Error adding customer: " + error.message);
-  }
-});
-
-
-exports.submitComplaint = functions.https.onRequest(async (req, res) => {
-  const {customerId, subject, description} = req.body;
-
-  try {
-    // Check if the customer exists
-    const customerDoc = await db.collection("Customers").doc(customerId).get();
-    if (!customerDoc.exists) {
-      res.status(404).send("Customer not found.");
-      return;
-    }
-
-    // Add a new complaint
-    await db.collection("complaints").add({
-      customerId,
-      subject,
-      description,
-      status: "open", // Status defaults to "open"
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    res.status(200).send("Complaint submitted successfully!");
-  } catch (error) {
-    console.error("Error submitting complaint:", error);
-    res.status(500).send("Failed to submit complaint.");
-  }
-});
-exports.registerUser = functions.https.onRequest(async (req, res) => {
-  const {name, email, phone, address} = req.body;
-
-  try {
-    // Generate a unique ID for the user
-    const userId = phone;
-
-    // Save the customer data
-    await db.collection("Customers").doc(userId).set({
-      name,
-      email,
-      phone,
-      address,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    res.status(200).send("User registered successfully!");
-  } catch (error) {
-    console.error("Error registering user:", error);
-    res.status(500).send("Failed to register user.");
-  }
-});
-/* exports.updateComplaintStatus = functions.https.
-onRequest(async (req, res) => {
-  const {complaintId, status} = req.body;
-
-  try {
-    // Update the complaint's status
-    await db.collection("complaints").doc(complaintId).update({
-      status,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    res.status(200).send(`Complaint status updated to ${status}.`);
-  } catch (error) {
-    console.error("Error updating complaint status:", error);
-    res.status(500).send("Failed to update complaint status.");
-  }
-});
-exports.getComplaints = functions.https.onRequest(async (req, res) => {
-  const {customerId, status} = req.query;
-
-  try {
-    const complaintsQuery = db
-        .collection("complaints")
-        .where("customerId", "==", customerId);
-
-    if (status) {
-      complaintsQuery.where("status", "==", status);
-    }
-
-    const complaintsSnapshot = await complaintsQuery.get();
-    const complaints = complaintsSnapshot.docs.map((doc) => doc.data());
-
-    res.status(200).json(complaints);
-  } catch (error) {
-    console.error("Error retrieving complaints:", error);
-    res.status(500).send("Failed to retrieve complaints.");
-  }
-}); */
 
 exports.getCustomerData = functions.https.onRequest(async (req, res) => {
   let {phone} = req.query;
@@ -238,20 +122,78 @@ exports.getCustomerData = functions.https.onRequest(async (req, res) => {
   }
 });
 
-exports.updateTabData = functions.https.onRequest(async (req, res) => {
-  const collectionName = req.body.collection || "TabData"; // Collection name
-  const tabId = req.body.tabId; // Tab ID to update
-  const newContent = req.body.content; // New content to update
+
+exports.submitComplaint = functions.https.onRequest(async (req, res) => {
+  const {customerId, subject, description} = req.body;
 
   try {
-    await admin.firestore().collection(collectionName)
-        .doc(tabId).update({content: newContent});
-    res.status(200).send({message: "Tab updated successfully"});
+    // Check if the customer exists
+    const customerDoc = await db.collection("Customers").doc(customerId).get();
+    if (!customerDoc.exists) {
+      res.status(404).send("Customer not found.");
+      return;
+    }
+
+    // Add a new complaint
+    await db.collection("complaints").add({
+      customerId,
+      subject,
+      description,
+      status: "open", // Status defaults to "open"
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).send("Complaint submitted successfully!");
   } catch (error) {
-    res.status(500).send({message: "Error updating data", error});
+    console.error("Error submitting complaint:", error);
+    res.status(500).send("Failed to submit complaint.");
+  }
+});
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+
+
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
+// CLOUD FUNCTIONS FOR WIX
+// Existing Cloud Function for adding a new customer to Firestore
+exports.addCustomer = functions.https.onRequest(async (req, res) => {
+  const {firstname, lastname, email, phone, address, city} = req.body;
+
+  // Validate required fields
+  if (!firstname || !lastname || !email || !phone || !address || !city) {
+    res.status(400).send("Missing required fields");
+    return;
+  }
+
+  try {
+    // Auto-generate a serialNo using Firestore's auto-ID
+    const customerRef = await db.collection("Customers").add({
+      firstname,
+      lastname,
+      email,
+      phone,
+      address,
+      city,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log("Customer added with ID:", customerRef.id);
+
+    res.status(200).send({
+      message: "Customer added successfully!",
+      serialNo: customerRef.id, // Return the generated serialNo (document ID)
+    });
+  } catch (error) {
+    console.error("Error adding customer:", error);
+    res.status(500).send("Error adding customer: " + error.message);
   }
 });
 
+
+// GET CUSTOMER DATA FROM FIRESTORE TO WIX
 exports.getCustomersData = functions.https.onRequest(async (req, res) => {
   cors(req, res, async () => {
     try {
@@ -279,7 +221,8 @@ exports.getCustomersData = functions.https.onRequest(async (req, res) => {
   });
 });
 
-// Update customer data
+
+// STORE THE UPDATED CUSTOMER DATA FROM WIX TO FIRESTORE
 exports.updateCustomerData = functions.https.onRequest(async (req, res) => {
   try {
     const customerData = req.body;
@@ -305,6 +248,7 @@ exports.updateCustomerData = functions.https.onRequest(async (req, res) => {
 });
 
 
+// GET ALL CUSTOMER WARRANTY DATA FROM FIRESTORE TO WIX
 exports.getAllCustomerWarranties = functions
     .https.onRequest(async (req, res) => {
       cors(req, res, async () => {
@@ -359,6 +303,8 @@ exports.getAllCustomerWarranties = functions
       });
     });
 
+
+// STORE THE WARRANTY RECORDS FROM WIX FORM TO FIRESTORE
 exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
   cors(req, res, async () => {
     try {
@@ -438,6 +384,8 @@ function generateUniqueId() {
   return Math.floor(1000 + Math.random() * 9000); // Generate a number
 }
 
+
+// GET ALL CUSTOMER COMPLAINT DATA FROM FIRESTORE TO WIX
 exports.getAllCustomerComplaints = functions
     .https.onRequest(async (req, res) => {
       cors(req, res, async () => {
@@ -499,6 +447,8 @@ exports.getAllCustomerComplaints = functions
       });
     });
 
+
+// STORE THE UPDATED COMPLAINT DATA FROM WIX TO FIRESTORE
 exports.updateComplaintStatus = functions.https.onRequest(async (req, res) => {
   try {
     const complaintData = req.body;
