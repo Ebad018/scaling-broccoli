@@ -12,7 +12,7 @@ const db = admin.firestore();
 // COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
 // CLOUD FUNCTION FOR TWILIO
 // Cloud Function for handling Twilio Webhook and sending automated responses
-exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
+/* exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
   const incomingPhone = req.body.From; // Phone number from Twilio
   const messageBody = req.body.Body.trim(); // Message content
 
@@ -79,7 +79,7 @@ exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
     console.error("Error handling Twilio webhook:", error);
     res.status(500).send("Internal Server Error");
   }
-});
+}); */
 
 
 exports.getCustomerData = functions.https.onRequest(async (req, res) => {
@@ -449,49 +449,45 @@ exports.getAllCustomerComplaints = functions
 
 
 // STORE THE UPDATED COMPLAINT DATA FROM WIX TO FIRESTORE
-exports.updateComplaintStatus = functions.https.onRequest(async (req, res) => {
-  try {
-    const complaintData = req.body;
-    const customerId = complaintData.customerId; // ID of the customer document
-    const complaintId = complaintData.complaintId; // ID of the complaint docume
+exports.updateComplaintStatus = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      // Only allow POST requests
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed");
+      }
 
-    // Reference to the customer's document
-    const customerDocRef = admin.firestore()
-        .collection("Customers").doc(customerId);
+      // Extract data from the request body
+      const {customerId, complaintId, complaint,
+        complaintstatus, closingdate} = req.body;
 
-    // Check if the customer document exists
-    const customerDoc = await customerDocRef.get();
-    if (!customerDoc.exists) {
-      return res.status(404).send({error: "Customer document not found."});
+      if (!customerId || !complaintId || !complaint ||
+         !complaintstatus || !closingdate) {
+        return res.status(400).send("Invalid request: Missing required fields");
+      }
+
+      // Reference to the specific complaint document
+      const complaintDocRef = admin.firestore()
+          .collection("Customers")
+          .doc(customerId)
+          .collection("Complaints")
+          .doc(complaintId);
+
+      // Update the complaint document
+      await complaintDocRef.update({
+        complaint,
+        complaintstatus,
+        closingdate,
+      });
+
+      console.log(`Complaint ${complaintId} for customer
+         ${customerId} updated successfully`);
+      return res.status(200).send({success: true, message:
+         "Complaint updated successfully"});
+    } catch (error) {
+      console.error("Error updating complaint:", error);
+      return res.status(500).send({success: false,
+        message: "Failed to update complaint"});
     }
-
-    // Reference to the complaint document inside the Complaints sub-collection
-    const complaintDocRef = customerDocRef.collection("Complaints")
-        .doc(complaintId);
-
-    // Check if the complaint document exists
-    const complaintDoc = await complaintDocRef.get();
-    if (!complaintDoc.exists) {
-      return res.status(404).send({error: "Complaint document not found."});
-    }
-
-    // Proceed with the update
-    await complaintDocRef.update({
-      firstname: complaintData.firstname,
-      lastname: complaintData.lastname,
-      phone: complaintData.phone,
-      address: complaintData.address,
-      city: complaintData.city,
-      complaintdate: admin.firestore.Timestamp
-          .fromDate(new Date(complaintData.complaintdate)),
-      complaint: complaintData.complaint,
-      complaintstatus: complaintData.complaintstatus,
-      closingdate: complaintData.closingdate,
-    });
-
-    res.status(200).send({success: true});
-  } catch (error) {
-    console.error("Error updating complaint data:", error);
-    res.status(500).send({error: "Unable to update complaint data"});
-  }
+  });
 });
