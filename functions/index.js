@@ -390,8 +390,8 @@ exports.getAllCustomerComplaints = functions
     .https.onRequest(async (req, res) => {
       cors(req, res, async () => {
         try {
-          const customersSnapshot = await admin.firestore()
-              .collection("Customers").get();
+          const customersSnapshot = await admin
+              .firestore().collection("Customers").get();
 
           const customersWithComplaints = [];
 
@@ -411,21 +411,23 @@ exports.getAllCustomerComplaints = functions
 
               // Convert Firestore timestamps to JavaScript Date objects
               const complaintDate = complaintData.complaintdate.toDate();
-              // Convert 'date' timestamp to Date
+              // still a Firestore timestamp
               let closingDate = null;
 
+              // Since 'closingdate' is a string,
+              // no need to convert it using .toDate()
               if (complaintData.closingdate) {
-                closingDate = complaintData.closingdate.toDate();
-                // Convert 'closingdate' timestamp to Date if it exists
+                closingDate = complaintData.closingdate;
+                // directly use the string value
               }
 
               return {
                 id: complaintDoc.id,
                 ...complaintData,
                 complaintdate: complaintDate.toLocaleDateString(),
-                // Format 'date' as readable string
-                closingdate: closingDate ?
-                closingDate.toLocaleDateString(): null,
+                // Format 'complaintdate'
+                closingdate: closingDate || null,
+                // No need to format the string 'closingdate'
               };
             });
 
@@ -491,3 +493,44 @@ exports.updateComplaintStatus = functions.https.onRequest((req, res) => {
     }
   });
 });
+
+// SEARCH FOR A WARRANTY RECORD BASED ON PHONE NUMBER
+// functions/index.js
+
+exports.searchWarrantyByPhone = functions
+    .https.onCall(async (data, context) => {
+      const phoneNumber = data.phone;
+
+      try {
+      // Get all documents in 'Customers' collection
+        const customersSnapshot = await db.collection("Customers").get();
+
+        // Loop through each customer document
+        for (const customerDoc of customersSnapshot.docs) {
+          const customerId = customerDoc.id;
+
+          // Get all documents in the 'Warranties'
+          //  sub-collection for this customer
+          const warrantiesSnapshot = await db.collection("Customers")
+              .doc(customerId)
+              .collection("Warranties")
+              .where("phone", ""=="", phoneNumber)
+              .get();
+
+          // Check if the warranty exists
+          if (!warrantiesSnapshot.empty) {
+            // If a warranty is found, return the data
+            const warrantyData = warrantiesSnapshot
+                .docs.map((doc) => doc.data());
+            return {status: "success", customerId, warrantyData};
+          }
+        }
+
+        // If no warranty is found
+        return {status: "not_found",
+          message: "No warranty found for the given phone number"};
+      } catch (error) {
+        console.error("Error searching warranty by phone:", error);
+        return {status: "error", message: error.message};
+      }
+    });
