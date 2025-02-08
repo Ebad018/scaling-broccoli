@@ -274,13 +274,12 @@ exports.getAllCustomerWarranties = functions
 
               // Convert Firestore timestamps to JavaScript Date objects
               const startdate = warrantyData
-                  .startdate.toDate(); // Convert Firestore timestamp to Date
+                  .startdate; // Convert Firestore timestamp to Date
 
               return {
                 id: warrantyDoc.id,
                 ...warrantyData,
-                startdate: startdate
-                    .toLocaleDateString(),
+                startdate: startdate,
                 // Format Date as readable string (e.g., "MM/DD/YYYY")
               };
             });
@@ -356,7 +355,7 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
           lastname,
           phone,
           email,
-          startdate: startDateObject,
+          startdate,
           endingdate: endingDate,
           devicedetails,
         });
@@ -497,40 +496,85 @@ exports.updateComplaintStatus = functions.https.onRequest((req, res) => {
 // SEARCH FOR A WARRANTY RECORD BASED ON PHONE NUMBER
 // functions/index.js
 
-exports.searchWarrantyByPhone = functions
-    .https.onCall(async (data, context) => {
-      const phoneNumber = data.phone;
 
-      try {
-      // Get all documents in 'Customers' collection
-        const customersSnapshot = await db.collection("Customers").get();
+exports.getWarrantiesByPhone = functions.https.onRequest((req, res) => {
+  // Ensure CORS is handled
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST");
+  res.set("Access-Control-Allow-Headers', 'Content-Type");
 
-        // Loop through each customer document
-        for (const customerDoc of customersSnapshot.docs) {
-          const customerId = customerDoc.id;
+  // Handle preflight requests
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
 
-          // Get all documents in the 'Warranties'
-          //  sub-collection for this customer
-          const warrantiesSnapshot = await db.collection("Customers")
-              .doc(customerId)
-              .collection("Warranties")
-              .where("phone", ""=="", phoneNumber)
-              .get();
+  // Retrieve the phone number from the query string
+  const phoneQuery = req.query.phone;
 
-          // Check if the warranty exists
-          if (!warrantiesSnapshot.empty) {
-            // If a warranty is found, return the data
-            const warrantyData = warrantiesSnapshot
-                .docs.map((doc) => doc.data());
-            return {status: "success", customerId, warrantyData};
-          }
-        }
-
-        // If no warranty is found
-        return {status: "not_found",
-          message: "No warranty found for the given phone number"};
-      } catch (error) {
-        console.error("Error searching warranty by phone:", error);
-        return {status: "error", message: error.message};
-      }
+  if (!phoneQuery || phoneQuery.length !== 10) {
+    return res.status(400).json({
+      status: "error",
+      message: "Invalid phone number.",
     });
+  }
+
+  // Function to find warranties based on phone number
+  const getWarranties = async (phone) => {
+    try {
+      const customersSnapshot = await db.collection("Customers").get();
+      let warranties = [];
+
+      customersSnapshot.forEach((customerDoc) => {
+        const customerData = customerDoc.data();
+        const customerPhone = customerData.phone || "";
+
+        // Compare the last 10 digits of the stored phone number
+        //  with the query phone number
+        if (customerPhone.slice(-10) === phone) {
+          // Fetch the 'Warranties' subcollection
+          const warrantiesRef = db.collection("Customers")
+              .doc(customerDoc.id).collection("Warranties");
+          warranties.push(warrantiesRef.get());
+        }
+      });
+
+      // Wait for all promises to resolve
+      warranties = await Promise.all(warranties);
+
+      // Flatten warranties array and extract relevant data
+      const warrantyData = [];
+      warranties.forEach((warrantySnapshot) => {
+        warrantySnapshot.forEach((doc) => {
+          warrantyData.push({
+            id: doc.id,
+            devicedetails: doc.data().devicedetails,
+            startdate: doc.data().startdate,
+            endingdate: doc.data().endingdate,
+          });
+        });
+      });
+
+      if (warrantyData.length > 0) {
+        return res.status(200).json({
+          status: "success",
+          warranties: warrantyData,
+        });
+      } else {
+        return res.status(404).json({
+          status: "error",
+          message: "No warranties found for this phone number",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching warranties:", error);
+      return res.status(500).json({
+        status: "error",
+        message: "Internal server error",
+      });
+    }
+  };
+
+  // Call the function with the last 10 digits of the phone number
+  getWarranties(phoneQuery);
+});
