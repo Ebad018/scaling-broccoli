@@ -137,6 +137,173 @@ exports.registerWarranty = functions.https.onRequest(async (req, res) => {
   }
 });
 
+
+// GET CUSTOMER COMPLAINT BY PHONE NUMBER THROUGH WHATSAPP
+
+
+exports.getCustomerComplaintsW = functions.https.onRequest(async (req, res) => {
+  try {
+    // Get the phone number from the request body
+    const phoneNumber = req.body.phoneNumber;
+
+    // Check if the phone number is valid
+    if (!phoneNumber || phoneNumber.length < 10) {
+      return res.status(400).send("Invalid phone number");
+    }
+
+    // Extract the last 10 digits of the phone number
+    const last10Digits = phoneNumber.slice(-10);
+
+    // Query the 'Customers' collection to find the document
+    // where the 'phone' field ends with the last 10 digits
+    const customersSnapshot = await db.collection("Customers")
+        .where("phone", ">=", last10Digits)
+        .where("phone", "<=", last10Digits + "\uf8ff")
+        .get();
+
+    if (customersSnapshot.empty) {
+      return res.status(404).send("No customer found");
+    }
+
+    // Assuming there is only one customer document for the given phone number
+    const customerDoc = customersSnapshot.docs[0];
+
+    // Reference to the 'Complaints' sub-collection of the customer
+    const complaintsRef = db.collection("Customers").
+        doc(customerDoc.id).collection("Complaints");
+
+    // Fetch all documents inside the 'Complaints' sub-collection
+    const complaintsSnapshot = await complaintsRef.get();
+
+    if (complaintsSnapshot.empty) {
+      return res.status(404).send("No complaints found for this customer");
+    }
+
+    // Prepare the response by collecting the complaints data
+    const complaints = [];
+    complaintsSnapshot.forEach((doc) => {
+      complaints.push({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+
+    // Send the complaints data back as the response
+    return res.status(200).json({complaintsDetails: complaints});
+  } catch (error) {
+    console.error("Error fetching complaints:", error);
+    return res.status(500).send("Error fetching complaints");
+  }
+});
+
+
+// Function to check if a document exists based on
+//  the 'phone' field in 'Customers' collection
+exports.checkCustomerExists = functions.https.onRequest(async (req, res) => {
+  try {
+    // Get the phone number from the request body
+    const phoneNumber = req.body.phoneNumber;
+
+    // Validate the phone number
+    if (!phoneNumber || phoneNumber.length < 10) {
+      return res.status(400).send("Invalid phone number");
+    }
+
+    // Extract the last 10 digits of the phone number
+    const last10Digits = phoneNumber.slice(-10);
+
+    // Query the 'Customers' collection
+    // to check if the 'phone' field ends with the last 10 digits
+    const customersSnapshot = await db.collection("Customers")
+        .where("phone", ">=", last10Digits)
+        .where("phone", "<=", last10Digits + "\uf8ff")
+        .get();
+
+    // If no documents found, return false
+    if (customersSnapshot.empty) {
+      return res.status(404).send("Customer not found");
+    }
+
+    // If document is found, return true
+    return res.status(200).send("Customer exists");
+  } catch (error) {
+    console.error("Error checking customer:", error);
+    return res.status(500).send("Error checking customer");
+  }
+});
+
+
+// Function to add a new complaint
+//  inside 'Complaints' sub-collection based on phone number
+exports.addComplaint = functions.https.onRequest(async (req, res) => {
+  try {
+    // Extract data from the request body
+    const {phone, firstname, lastname, address, city, complaint} = req.body;
+
+    // Validate the phone number
+    if (!phone || phone.length < 10) {
+      return res.status(400).send("Invalid phone number");
+    }
+
+    // Validate other required fields
+    if (!firstname || !lastname || !address || !city || !complaint) {
+      return res.status(400).send("Missing required fields");
+    }
+
+    // Extract the last 10 digits of the phone number
+    const last10Digits = phone.slice(-10);
+
+    // Query the 'Customers' collection to find
+    //  the customer by the last 10 digits of their phone number
+    const customersSnapshot = await db.collection("Customers")
+        .where("phone", ">=", last10Digits)
+        .where("phone", "<=", last10Digits + "\uf8ff")
+        .get();
+
+    // If no customer found, return an error
+    if (customersSnapshot.empty) {
+      return res.status(404).send("Customer not found");
+    }
+
+    // Get the customer document ID
+    let customerDocId;
+    customersSnapshot.forEach((doc) => {
+      customerDocId = doc.id;
+    });
+
+    // Generate a random 5-digit number for the complaint document ID
+    const complaintDocId = Math.floor(10000 + Math.random() * 90000).toString();
+
+    // Get the current date
+    const currentDate = new Date().toISOString().split("T")[0];
+    // Format: YYYY-MM-DD
+
+    // Complaint data to be added
+    const complaintData = {
+      firstname: firstname,
+      lastname: lastname,
+      address: address,
+      city: city,
+      complaint: complaint,
+      complaintdate: currentDate, // Set to current date
+      closingdate: "", // Set empty for now
+      complaintstatus: "Registered", // Initial status
+    };
+
+    // Add the complaint document to the
+    //  'Complaints' sub-collection inside the customer document
+    await db.collection("Customers").doc(customerDocId)
+        .collection("Complaints").doc(complaintDocId).set(complaintData);
+
+    // Return a success response
+    return res.status(200).send("Complaint registered successfully");
+  } catch (error) {
+    console.error("Error adding complaint:", error);
+    return res.status(500).send("Error registering complaint");
+  }
+});
+
+
 // Cloud Function for handling Twilio Webhook and sending automated responses
 /* exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
   const incomingPhone = req.body.From; // Phone number from Twilio
