@@ -90,17 +90,22 @@ function formatTimestamp(timestamp) {
 
 
 exports.registerWarranty = functions.https.onRequest(async (req, res) => {
-  const {firstname, lastname, phone, devicedetails} = req.body;
+  const {firstname, lastname, phoneNumber, devicedetails} = req.body;
 
-  if (!firstname || !lastname || !phone || !devicedetails) {
+  // Check if all required fields are provided
+  if (!firstname || !lastname || !phoneNumber || !devicedetails) {
     res.status(400).send("All fields are required");
     return;
   }
 
+  const last10Digits = phoneNumber.slice(-10);
+  // Extract last 10 digits of phone number
+
   try {
     const customersRef = admin.firestore().collection("Customers");
     const snapshot = await customersRef
-        .where("phone", "==", phone.slice(-10)) // Match last 10 digits
+        .where("phone", ">=", last10Digits) // Match last 10 digits
+        .where("phone", "<=", last10Digits + "\uf8ff")
         .get();
 
     if (!snapshot.empty) {
@@ -111,24 +116,28 @@ exports.registerWarranty = functions.https.onRequest(async (req, res) => {
       // Create Warranty ID: CurrentYearSAB-000<Random 4-digit number>
       const currentYear = new Date().getFullYear();
       const randomFourDigits = Math.floor(1000 + Math.random() * 9000);
-      // Generates a 4-digit random number
+      // 4-digit random number
       const warrantyID = `${currentYear}SAB-000${randomFourDigits}`;
 
       // Add new warranty to the sub-collection
       await warrantiesRef.doc(warrantyID).set({
+        firstname: firstname,
+        lastname: lastname,
+        phone: last10Digits, // Store last 10 digits of phone
         devicedetails: devicedetails,
-        startdate: new Date(),
-        endingdate: new Date(new Date().setFullYear(new Date()
-            .getFullYear() + 1)), // 1 year warranty
+        startdate: new Date(), // Start date is the current date
+        endingdate: new Date(new Date()
+            .setFullYear(new Date().getFullYear() + 1)), // 1 year warranty
       });
 
+      // Send response with warranty ID
       res.status(200)
-          .send("Warranty registered successfully with ID: ${warrantyID}");
+          .send(`Warranty registered successfully with ID: ${warrantyID}`);
     } else {
-      // Customer not found, ask for additional details to register
+      // Customer not found
       res.status(404).send({
         message: "Customer not found.",
-        additionalDetailsNeeded: true,
+        additionalDetailsNeeded: true, // Option to ask for additional info
       });
     }
   } catch (error) {
@@ -303,6 +312,72 @@ exports.addComplaint = functions.https.onRequest(async (req, res) => {
   }
 });
 
+
+// FETCH THE LATEST COMPLAINT
+
+exports.getLatestComplaint = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    return res.status(405).send("Method Not Allowed");
+  }
+
+  const phone = req.body.phone;
+
+  // Validate phone number
+  if (!phone || phone.length < 10) {
+    return res.status(400).send({error: "Phone number is required"});
+  }
+
+  try {
+    // Slice the phone number to the last 10 digits
+    const last10Digits = phone.slice(-10);
+
+    // Query the 'Customers' collection
+    // to find the customer by the last 10 digits of the phone number
+    const customersSnapshot = await db.collection("Customers")
+        .where("phone", ">=", last10Digits)
+        .where("phone", "<=", last10Digits + "\uf8ff")
+        .get();
+
+    // Check if customer was found
+    if (customersSnapshot.empty) {
+      return res.status(404).send({error: "Customer not found"});
+    }
+
+    // Get the customer document ID
+    let customerDocId;
+    customersSnapshot.forEach((doc) => {
+      customerDocId = doc.id;
+      // Assuming there will be only one matching customer
+    });
+
+    // Fetch the latest document from the 'Complaints' sub-collection
+    const complaintsSnapshot = await db.collection("Customers")
+        .doc(customerDocId)
+        .collection("Complaints")
+        .orderBy("complaintdate", "desc")
+        .limit(1) // Get the latest complaint
+        .get();
+
+    // Check if there are any complaints
+    if (complaintsSnapshot.empty) {
+      return res.status(404).send({error: "No complaints found"});
+    }
+
+    // Get the latest complaint document and return its full document ID
+    let complaintDocId;
+    complaintsSnapshot.forEach((doc) => {
+      complaintDocId = doc.id;
+    });
+
+    // Return the full complaint document ID
+    return res.status(200).send({
+      complaintDocId: complaintDocId,
+    });
+  } catch (error) {
+    console.error("Error fetching latest complaint:", error);
+    return res.status(500).send({error: "An error occurred"});
+  }
+});
 
 // Cloud Function for handling Twilio Webhook and sending automated responses
 /* exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
