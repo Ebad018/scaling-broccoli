@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const cors = require("cors")({origin: true});
+// const bodyParser = require("body-parser");
 
 // Initialize Firebase Admin SDK
 admin.initializeApp();
@@ -527,18 +528,18 @@ exports.submitComplaint = functions.https.onRequest(async (req, res) => {
 // COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
 // CLOUD FUNCTIONS FOR WIX
 // Existing Cloud Function for adding a new customer to Firestore
-exports.addCustomer = functions.https.onRequest(async (req, res) => {
-  const {firstname, lastname, email, phone, address, city} = req.body;
+exports.addCustomer = functions.https.onRequest((req, res) => {
+  cors(req, res, () => {
+    const {firstname, lastname, email, phone, address, city} = req.body;
 
-  // Validate required fields
-  if (!firstname || !lastname || !email || !phone || !address || !city) {
-    res.status(400).send("Missing required fields");
-    return;
-  }
+    // Validate required fields
+    if (!firstname || !lastname || !email || !phone || !address || !city) {
+      res.status(400).send("Missing required fields");
+      return;
+    }
 
-  try {
-    // Auto-generate a serialNo using Firestore's auto-ID
-    const customerRef = await db.collection("Customers").add({
+    // Add customer to Firestore
+    db.collection("Customers").add({
       firstname,
       lastname,
       email,
@@ -546,20 +547,15 @@ exports.addCustomer = functions.https.onRequest(async (req, res) => {
       address,
       city,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    console.log("Customer added with ID:", customerRef.id);
-
-    res.status(200).send({
-      message: "Customer added successfully!",
-      serialNo: customerRef.id, // Return the generated serialNo (document ID)
-    });
-  } catch (error) {
-    console.error("Error adding customer:", error);
-    res.status(500).send("Error adding customer: " + error.message);
-  }
+    })
+        .then(() => {
+          res.status(200).send("Customer added successfully!");
+        })
+        .catch((error) => {
+          res.status(500).send("Error adding customer: " + error.message);
+        });
+  });
 });
-
 
 // GET CUSTOMER DATA FROM FIRESTORE TO WIX
 exports.getCustomersData = functions.https.onRequest(async (req, res) => {
@@ -682,11 +678,11 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
 
       // Parse incoming data
       const {firstname, lastname, phone, email,
-        startdate, devicedetails} = req.body;
+        startdate, devicedetails, deviceserial} = req.body;
 
       // Check if all required fields are provided
       if (!firstname || !lastname || !phone ||
-         !email || !startdate || !devicedetails) {
+         !email || !startdate || !devicedetails || !deviceserial) {
         return res.status(400).send("Missing required fields");
       }
 
@@ -726,6 +722,7 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
           startdate,
           endingdate: endingDate,
           devicedetails,
+          deviceserial,
         });
 
         return res.status(200)
@@ -750,6 +747,131 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
 function generateUniqueId() {
   return Math.floor(1000 + Math.random() * 9000); // Generate a number
 }
+
+
+// STORE THE COMPLAINT RECORDS FROM WIX FORM TO FIRESTORE
+/**
+ * Generates a unique 4-digit complaint ID for a customer.
+ * Ensures the generated ID doesn't already exist.
+ *
+ * @param {string} customerId - The ID of the customer document.
+ * @return {Promise<string>} - A promise that resolves to unique complaint ID.
+ */
+async function generateUniqueComplaintId(customerId) {
+  let uniqueId;
+  let exists = true;
+
+  while (exists) {
+    // Generate a random 4-digit number
+    uniqueId = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // Check if the generated ID already exist in the 'Complaints' subcollection
+    const existingComplaintDoc = await admin.firestore()
+        .collection("Customers")
+        .doc(customerId)
+        .collection("Complaints")
+        .doc(uniqueId)
+        .get();
+
+    if (!existingComplaintDoc.exists) {
+      exists = false; // ID is unique
+    }
+  }
+
+  return uniqueId;
+}
+
+/**
+ * Cloud function to handle complaint form submission.
+ * Stores complaint information in Firestore under a 'Complaints' subcollection
+ * for the customer identified by their email.
+ *
+ * @param {Object} req - The HTTP request object.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<void>} - Sends a success or error response.
+ */
+exports.handleComplaintFormSubmit = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      // Check if request is POST
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed");
+      }
+
+      // Parse incoming data
+      const {
+        firstname,
+        lastname,
+        phone,
+        email,
+        city,
+        address,
+        complaint,
+      } = req.body;
+
+      // Check if all required fields are provided
+      if (!firstname || !lastname || !phone || !email ||
+         !city || !address || !complaint) {
+        return res.status(400).send("Missing required fields");
+      }
+
+      // Check if the 'Customers' collection
+      // contains a document with the provided email
+      const customerDocRef = admin.firestore()
+          .collection("Customers")
+          .where("email", "==", email);
+      const customerSnapshot = await customerDocRef.get();
+
+      if (!customerSnapshot.empty) {
+        // Document with email exists, work with the first match
+        const customerDoc = customerSnapshot.docs[0];
+        const customerId = customerDoc.id; // Get customer document ID
+
+        // Generate a unique 4-digit complaint ID
+        const complaintId = await generateUniqueComplaintId(customerId);
+
+        // Get current date for complaint date
+        const complaintDate = new Date();
+
+        // Set default values for complaint status and closing date
+        const complaintStatus = "Registered";
+        const closingDate = ""; // Leave empty
+
+        // Create a new 'Complaints' subcollection
+        // under the 'Customers' document with the unique ID
+        const complaintDocRef = admin.firestore()
+            .collection("Customers")
+            .doc(customerId)
+            .collection("Complaints")
+            .doc(complaintId);
+
+        // Add complaint data to Firestore
+        await complaintDocRef.set({
+          firstname,
+          lastname,
+          phone,
+          email,
+          city,
+          address,
+          complaint,
+          complaindate: complaintDate,
+          complaintstatus: complaintStatus,
+          closingdate: closingDate,
+        });
+
+        return res.status(200).send({status: "success",
+          message: "Complaint document created", complaintId});
+      } else {
+        return res.status(404).send({status: "error",
+          message: "Customer not found"});
+      }
+    } catch (error) {
+      console.error("Error processing the form:", error);
+      return res.status(500).send({status: "error",
+        message: "Internal Server Error"});
+    }
+  });
+});
 
 
 // GET ALL CUSTOMER COMPLAINT DATA FROM FIRESTORE TO WIX
@@ -941,5 +1063,84 @@ exports.getWarrantiesByPhone = functions.https.onRequest((req, res) => {
 
     // Call the function with the last 10 digits of the phone number
     await getWarranties(phoneQuery);
+  });
+});
+
+
+exports.getComplaintsByPhone = functions.https.onRequest((req, res) => {
+  // Handle CORS preflight requests and actual requests
+  cors(req, res, async () => {
+    // Ensure the correct method is used
+    if (req.method === "OPTIONS") {
+      return res.status(204).send(""); // Respond to preflight request
+    }
+
+    // Retrieve the phone number from the query string
+    const phoneQuery = req.query.phone;
+
+    if (!phoneQuery || phoneQuery.length !== 10) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid phone number. Please provide the last 10 digits.",
+      });
+    }
+
+    // Function to find complaints based on phone number
+    const getComplaints = async (phone) => {
+      try {
+        const customersSnapshot = await db.collection("Customers").get();
+        let complaints = [];
+
+        customersSnapshot.forEach((customerDoc) => {
+          const customerData = customerDoc.data();
+          const customerPhone = customerData.phone || "";
+
+          // Compare the last 10 digits of the stored phone number
+          // with the query phone number
+          if (customerPhone.slice(-10) === phone) {
+            // Fetch the 'Complaints' subcollection
+            const complaintsRef = db.collection("Customers")
+                .doc(customerDoc.id).collection("Complaints");
+            complaints.push(complaintsRef.get());
+          }
+        });
+
+        // Wait for all promises to resolve
+        complaints = await Promise.all(complaints);
+
+        // Flatten complaints array and extract relevant data
+        const complaintData = [];
+        complaints.forEach((complaintSnapshot) => {
+          complaintSnapshot.forEach((doc) => {
+            complaintData.push({
+              id: doc.id,
+              complaint: doc.data().complaint,
+              complaintstatus: doc.data().complaintstatus,
+            });
+          });
+        });
+
+        if (complaintData.length > 0) {
+          return res.status(200).json({
+            status: "success",
+            complaints: complaintData,
+          });
+        } else {
+          return res.status(404).json({
+            status: "error",
+            message: "No complaints found for this phone number",
+          });
+        }
+      } catch (error) {
+        console.error("Error fetching complaints:", error);
+        return res.status(500).json({
+          status: "error",
+          message: "Internal server error",
+        });
+      }
+    };
+
+    // Call the function with the last 10 digits of the phone number
+    await getComplaints(phoneQuery);
   });
 });
