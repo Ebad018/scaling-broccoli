@@ -538,16 +538,34 @@ exports.addCustomer = functions.https.onRequest((req, res) => {
       return;
     }
 
-    // Add customer to Firestore
-    db.collection("Customers").add({
-      firstname,
-      lastname,
-      email,
-      phone,
-      address,
-      city,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    })
+    // Check if the phone or email already exists in Firestore
+    const customersRef = db.collection("Customers");
+    const emailQuery = customersRef.where("email", "==", email);
+    const phoneQuery = customersRef.where("phone", "==", phone);
+
+    Promise.all([emailQuery.get(), phoneQuery.get()])
+        .then(([emailSnapshot, phoneSnapshot]) => {
+          if (!emailSnapshot.empty) {
+            res.status(400).send("A customer with this email already exists.");
+            return;
+          }
+
+          if (!phoneSnapshot.empty) {
+            res.status(400).send("A customer already exists.");
+            return;
+          }
+
+          // Add customer to Firestore if no conflicts
+          return customersRef.add({
+            firstname,
+            lastname,
+            email,
+            phone,
+            address,
+            city,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        })
         .then(() => {
           res.status(200).send("Customer added successfully!");
         })
@@ -556,6 +574,7 @@ exports.addCustomer = functions.https.onRequest((req, res) => {
         });
   });
 });
+
 
 // GET CUSTOMER DATA FROM FIRESTORE TO WIX
 exports.getCustomersData = functions.https.onRequest(async (req, res) => {
@@ -875,12 +894,12 @@ exports.handleComplaintFormSubmit = functions.https.onRequest((req, res) => {
 
 
 // GET ALL CUSTOMER COMPLAINT DATA FROM FIRESTORE TO WIX
-exports.getAllCustomerComplaints = functions
-    .https.onRequest(async (req, res) => {
+exports.getAllCustomerComplaints = functions.https
+    .onRequest(async (req, res) => {
       cors(req, res, async () => {
         try {
-          const customersSnapshot = await admin
-              .firestore().collection("Customers").get();
+          const customersSnapshot = await admin.firestore()
+              .collection("Customers").get();
 
           const customersWithComplaints = [];
 
@@ -898,33 +917,31 @@ exports.getAllCustomerComplaints = functions
             const complaints = complaintsSnapshot.docs.map((complaintDoc) => {
               const complaintData = complaintDoc.data();
 
-              // Convert Firestore timestamps to JavaScript Date objects
-              const complaintDate = complaintData.complaintdate.toDate();
-              // still a Firestore timestamp
-              let closingDate = null;
+              // Convert Firestore timestamp to JavaScript Date
+              // for 'complaintdate' if it exists
+              const complaintDate = complaintData.complaindate &&
+              complaintData.complaindate._seconds ?
+              new Date(complaintData.complaindate._seconds * 1000):
+              null;
 
-              // Since 'closingdate' is a string,
-              // no need to convert it using .toDate()
-              if (complaintData.closingdate) {
-                closingDate = complaintData.closingdate;
-                // directly use the string value
-              }
+              // 'closingdate' is likely already a string or null,
+              // so handle it directly
+              const closingDate = complaintData.closingdate || null;
 
               return {
-                id: complaintDoc.id,
+                id: complaintDoc.id, // Include complaint document ID
                 ...complaintData,
-                complaintdate: complaintDate.toLocaleDateString(),
-                // Format 'complaintdate'
-                closingdate: closingDate || null,
-                // No need to format the string 'closingdate'
+                complaintdate: complaintDate ? complaintDate
+                    .toLocaleDateString() : null, // Format date if available
+                closingdate: closingDate, // Keep closing date as-is
               };
             });
 
             // Add customer data along with complaints
             customersWithComplaints.push({
-              id: customerDoc.id,
+              id: customerDoc.id, // Include customer document ID
               ...customerData,
-              complaints: complaints,
+              complaints: complaints, // Include all complaints
             });
           }
 
@@ -932,8 +949,7 @@ exports.getAllCustomerComplaints = functions
           res.status(200).send(customersWithComplaints);
         } catch (error) {
           console.error("Error retrieving customer complaints:", error);
-          res.status(500)
-              .send({error: "Unable to retrieve customer complaints"});
+          res.status(500).send({error: "Unable to retrieve"});
         }
       });
     });
