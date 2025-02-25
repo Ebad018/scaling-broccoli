@@ -451,7 +451,7 @@ exports.getLatestComplaint = functions.https.onRequest(async (req, res) => {
 }); */
 
 
-exports.getCustomerData = functions.https.onRequest(async (req, res) => {
+/* exports.getCustomerData = functions.https.onRequest(async (req, res) => {
   let {phone} = req.query;
 
   // Validate the input
@@ -489,10 +489,10 @@ exports.getCustomerData = functions.https.onRequest(async (req, res) => {
     console.error("Error retrieving customer data:", error);
     res.status(500).send("Internal Server Error.");
   }
-});
+}); */
 
 
-exports.submitComplaint = functions.https.onRequest(async (req, res) => {
+/* exports.submitComplaint = functions.https.onRequest(async (req, res) => {
   const {customerId, subject, description} = req.body;
 
   try {
@@ -517,7 +517,7 @@ exports.submitComplaint = functions.https.onRequest(async (req, res) => {
     console.error("Error submitting complaint:", error);
     res.status(500).send("Failed to submit complaint.");
   }
-});
+}); */
 // COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
 // COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
 // COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
@@ -606,28 +606,48 @@ exports.getCustomersData = functions.https.onRequest(async (req, res) => {
 
 
 // STORE THE UPDATED CUSTOMER DATA FROM WIX TO FIRESTORE
-exports.updateCustomerData = functions.https.onRequest(async (req, res) => {
-  try {
+exports.saveUpdatedCustomer = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    if (req.method !== "POST") {
+      return res.status(405)
+          .json({message: "Only POST requests are allowed"});
+    }
+
     const customerData = req.body;
-    const customerId = customerData.id;
 
-    // Update the Firestore document with the new data
-    await admin.firestore().collection("Customers").doc(customerId).update({
-      firstname: customerData.firstname,
-      lastname: customerData.lastname,
-      phone: customerData.phone,
-      email: customerData.email,
-      address: customerData.address,
-      city: customerData.city,
-      createdAt: admin.firestore.Timestamp
-          .fromDate(new Date(customerData.createdAt)), // Keep original date
-    });
+    if (!customerData.id) {
+      return res.status(400).json({message: "Customer ID is required"});
+    }
 
-    res.status(200).send({success: true});
-  } catch (error) {
-    console.error("Error updating customer data:", error);
-    res.status(500).send({error: "Unable to update customer data"});
-  }
+    try {
+      // Reference to the customer document in Firestore
+      const customerRef = db.collection("Customers").doc(customerData.id);
+
+      // Check if customer exists
+      const customerDoc = await customerRef.get();
+      if (!customerDoc.exists) {
+        return res.status(404).json({message: "Customer not found"});
+      }
+
+      // Update customer data in Firestore
+      await customerRef.update({
+        firstname: customerData.firstname,
+        lastname: customerData.lastname,
+        phone: customerData.phone,
+        email: customerData.email,
+        address: customerData.address,
+        city: customerData.city,
+      });
+
+      // Return a success response
+      return res.status(200)
+          .json({message: "Customer data updated successfully"});
+    } catch (error) {
+      console.error("Error updating customer data:", customerData.id, error);
+      return res.status(500)
+          .json({message: "Internal server error", error: error.message});
+    }
+  });
 });
 
 
