@@ -28,47 +28,71 @@ const db = admin.firestore();
  * @param {Object} res - The HTTP response object to send back warranty details.
  * @returns {void}
  */
+
 exports.getWarrantyDetails = functions.https.onRequest(async (req, res) => {
-  const phoneNumber = req.body.phoneNumber; // Extract phone number from body
-  if (!phoneNumber) {
-    res.status(400).send("Phone number is required");
-    return;
-  }
+  cors(req, res, async () => {
+    const phoneNumber = req.body.phoneNumber; // Extract phone number from body
 
-  try {
-    const customersRef = admin.firestore().collection("Customers");
-    const snapshot = await customersRef
-        .where("phone", "==", phoneNumber.slice(-10)) // Match last 10 digits
-        .get();
-
-    if (snapshot.empty) {
-      res.status(404).send("No customer found with this phone number.");
+    if (!phoneNumber || phoneNumber.length < 10) {
+      res.status(400).send("Phone number is required");
       return;
     }
 
-    const customerDoc = snapshot.docs[0];
-    const warrantiesRef = customerDoc.ref.collection("Warranties");
-    const warrantiesSnapshot = await warrantiesRef.get();
+    try {
+      // Extract the last 10 digits of the phone number
+      const last10Digits = phoneNumber.slice(-10);
 
-    if (warrantiesSnapshot.empty) {
-      res.status(404).send("No warranty records found for this customer.");
-      return;
+      const customersRef = admin.firestore().collection("Customers");
+      const customersSnapshot = await customersRef.get();
+
+      if (customersSnapshot.empty) {
+        res.status(404).send("No customer found with this phone number.");
+        return;
+      }
+
+      let customerFound = false;
+      let customerDoc = null;
+
+      // Iterate over the customers to find a match for the last 10 digits
+      customersSnapshot.forEach((doc) => {
+        const customerPhone = doc.data().phone;
+
+        if (customerPhone && customerPhone.slice(-10) === last10Digits) {
+          customerFound = true;
+          customerDoc = doc;
+        }
+      });
+
+      if (!customerFound || !customerDoc) {
+        res.status(404).send("No customer found with this phone number.");
+        return;
+      }
+
+      // Get the warranties collection from the found customer
+      const warrantiesRef = customerDoc.ref.collection("Warranties");
+      const warrantiesSnapshot = await warrantiesRef.get();
+
+      if (warrantiesSnapshot.empty) {
+        res.status(404).send("No warranty records found for this customer.");
+        return;
+      }
+
+      // Format each warranty document data
+      const warrantyDetails = warrantiesSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        startdate: formatTimestamp(doc.data().startdate), // Format startdate
+        endingdate: formatTimestamp(doc.data().endingdate), // Format endingdate
+        devicedetails: doc.data().devicedetails,
+      }));
+
+      res.status(200).json({warrantyDetails});
+    } catch (error) {
+      console.error("Error fetching warranty details:", error);
+      res.status(500).send("Error fetching warranty details");
     }
-
-    // Format each warranty document data
-    const warrantyDetails = warrantiesSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      startdate: formatTimestamp(doc.data().startdate), // Format startdate
-      endingdate: formatTimestamp(doc.data().endingdate), // Format endingdate
-      devicedetails: doc.data().devicedetails,
-    }));
-
-    res.json({warrantyDetails});
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Error fetching warranty details");
-  }
+  });
 });
+
 
 /**
  * Helper function to format Firestore Timestamp to a readable date.
@@ -91,294 +115,377 @@ function formatTimestamp(timestamp) {
 
 
 exports.registerWarranty = functions.https.onRequest(async (req, res) => {
-  const {firstname, lastname, phoneNumber, devicedetails} = req.body;
+  cors(req, res, async () => {
+    const {firstname, lastname, phoneNumber,
+      devicedetails, deviceserial} = req.body;
 
-  // Check if all required fields are provided
-  if (!firstname || !lastname || !phoneNumber || !devicedetails) {
-    res.status(400).send("All fields are required");
-    return;
-  }
-
-  const last10Digits = phoneNumber.slice(-10);
-  // Extract last 10 digits of phone number
-
-  try {
-    const customersRef = admin.firestore().collection("Customers");
-    const snapshot = await customersRef
-        .where("phone", ">=", last10Digits) // Match last 10 digits
-        .where("phone", "<=", last10Digits + "\uf8ff")
-        .get();
-
-    if (!snapshot.empty) {
-      // Customer found, register warranty
-      const customerDoc = snapshot.docs[0];
-      const warrantiesRef = customerDoc.ref.collection("Warranties");
-
-      // Create Warranty ID: CurrentYearSAB-000<Random 4-digit number>
-      const currentYear = new Date().getFullYear();
-      const randomFourDigits = Math.floor(1000 + Math.random() * 9000);
-      // 4-digit random number
-      const warrantyID = `${currentYear}SAB-000${randomFourDigits}`;
-
-      // Add new warranty to the sub-collection
-      await warrantiesRef.doc(warrantyID).set({
-        firstname: firstname,
-        lastname: lastname,
-        phone: last10Digits, // Store last 10 digits of phone
-        devicedetails: devicedetails,
-        startdate: new Date(), // Start date is the current date
-        endingdate: new Date(new Date()
-            .setFullYear(new Date().getFullYear() + 1)), // 1 year warranty
-      });
-
-      // Send response with warranty ID
-      res.status(200)
-          .send(`Warranty registered successfully with ID: ${warrantyID}`);
-    } else {
-      // Customer not found
-      res.status(404).send({
-        message: "Customer not found.",
-        additionalDetailsNeeded: true, // Option to ask for additional info
-      });
+    // Check if all required fields are provided
+    if (!firstname || !lastname || !phoneNumber ||
+      !devicedetails || !deviceserial) {
+      res.status(400).send("All fields are required");
+      return;
     }
-  } catch (error) {
-    console.error("Error registering warranty:", error);
-    res.status(500).send("Internal Server Error");
-  }
-});
 
+    const last10Digits = phoneNumber.slice(-10);
+    // Extract last 10 digits of phone number
+
+    try {
+      const customersRef = admin.firestore().collection("Customers");
+      const customersSnapshot = await customersRef.get();
+
+      if (customersSnapshot.empty) {
+        res.status(404).send("Customer not found.");
+        return;
+      }
+
+      let customerFound = false;
+      let customerDoc = null;
+
+      // Iterate through all customers
+      customersSnapshot.forEach((doc) => {
+        const customerPhone = doc.data().phone;
+
+        if (customerPhone && customerPhone.slice(-10) === last10Digits) {
+          customerFound = true;
+          customerDoc = doc;
+        }
+      });
+
+      if (customerFound && customerDoc) {
+        // Customer found, proceed to register the warranty
+        const warrantiesRef = customerDoc.ref.collection("Warranties");
+
+        // Create Warranty ID: CurrentYearSAB-000<Random 4-digit number>
+        const currentYear = new Date().getFullYear();
+        const randomFourDigits = Math.floor(1000 + Math.random() * 9000);
+        // Generate 4-digit random number
+        const warrantyID = `${currentYear}SAB-000${randomFourDigits}`;
+
+        // Add new warranty to the sub-collection
+        await warrantiesRef.doc(warrantyID).set({
+          firstname: firstname,
+          lastname: lastname,
+          phone: last10Digits, // Store last 10 digits of phone
+          devicedetails: devicedetails,
+          deviceserial: deviceserial,
+          startdate: new Date(), // Start date is the current date
+          endingdate: new Date(new Date()
+              .setFullYear(new Date().getFullYear() + 1)), // 1-year warranty
+        });
+
+        // Send response with the warranty ID
+        res.status(200).send(`Warranty registered successfully: ${warrantyID}`);
+      } else {
+        // Customer not found
+        res.status(404).send({
+          message: "Customer not found.",
+          additionalDetailsNeeded: true, // Option to ask for additional info
+        });
+      }
+    } catch (error) {
+      console.error("Error registering warranty:", error);
+      res.status(500).send("Internal Server Error");
+    }
+  });
+});
 
 // GET CUSTOMER COMPLAINT BY PHONE NUMBER THROUGH WHATSAPP
 
 
-exports.getCustomerComplaintsW = functions.https.onRequest(async (req, res) => {
-  try {
-    // Get the phone number from the request body
-    const phoneNumber = req.body.phoneNumber;
+exports.getCustomerComplaintsW = functions.https
+    .onRequest(async (req, res) => {
+      cors(req, res, async () => {
+        try {
+          // Get phone number and complaint document ID from the request body
+          const phoneNumber = req.body.phoneNumber;
+          const complaintDocId = req.body.complaintDocId;
 
-    // Check if the phone number is valid
-    if (!phoneNumber || phoneNumber.length < 10) {
-      return res.status(400).send("Invalid phone number");
-    }
+          // Validate input
+          if (!phoneNumber || phoneNumber.length < 10) {
+            return res.status(400).send("Invalid phone number");
+          }
 
-    // Extract the last 10 digits of the phone number
-    const last10Digits = phoneNumber.slice(-10);
+          if (!complaintDocId) {
+            return res.status(400).send("Complaint document ID is required");
+          }
 
-    // Query the 'Customers' collection to find the document
-    // where the 'phone' field ends with the last 10 digits
-    const customersSnapshot = await db.collection("Customers")
-        .where("phone", ">=", last10Digits)
-        .where("phone", "<=", last10Digits + "\uf8ff")
-        .get();
+          // Extract the last 10 digits of the phone number
+          const last10Digits = phoneNumber.slice(-10);
 
-    if (customersSnapshot.empty) {
-      return res.status(404).send("No customer found");
-    }
+          // Query the 'Customers' collection to find the document
+          const customersSnapshot = await admin.firestore()
+              .collection("Customers").get();
 
-    // Assuming there is only one customer document for the given phone number
-    const customerDoc = customersSnapshot.docs[0];
+          if (customersSnapshot.empty) {
+            return res.status(404).send("No customer found");
+          }
 
-    // Reference to the 'Complaints' sub-collection of the customer
-    const complaintsRef = db.collection("Customers").
-        doc(customerDoc.id).collection("Complaints");
+          let customerFound = false;
+          let customerDoc = null;
 
-    // Fetch all documents inside the 'Complaints' sub-collection
-    const complaintsSnapshot = await complaintsRef.get();
+          // Iterate through all customers
+          customersSnapshot.forEach((doc) => {
+            const customerPhone = doc.data().phone;
 
-    if (complaintsSnapshot.empty) {
-      return res.status(404).send("No complaints found for this customer");
-    }
+            if (customerPhone && customerPhone.slice(-10) === last10Digits) {
+              customerFound = true;
+              customerDoc = doc;
+            }
+          });
 
-    // Prepare the response by collecting the complaints data
-    const complaints = [];
-    complaintsSnapshot.forEach((doc) => {
-      complaints.push({
-        id: doc.id,
-        ...doc.data(),
+          if (!customerFound || !customerDoc) {
+            return res.status(404).send("No customer found");
+          }
+
+          // Reference to the 'Complaints' sub-collection of the customer
+          const complaintDocRef = customerDoc.ref
+              .collection("Complaints").doc(complaintDocId);
+
+          // Fetch the document by its ID from the 'Complaints' sub-collection
+          const complaintDoc = await complaintDocRef.get();
+
+          if (!complaintDoc.exists) {
+            return res.status(404).send("Complaint document not found");
+          }
+
+          // Extract 'complaint' and 'complaintstatus' fields
+          const complaintData = complaintDoc.data();
+          const {complaint, complaintstatus} = complaintData;
+
+          // Format the response as an array to suit the Twilio syntax
+          const complaintsDetails = [{
+            complaint: complaint,
+            complaintstatus: complaintstatus,
+          }];
+
+          // Return the structured response
+          return res.status(200).json({
+            complaintsDetails: complaintsDetails,
+          });
+        } catch (error) {
+          console.error("Error fetching complaint details:", error);
+          return res.status(500).send("Error fetching complaint details");
+        }
       });
     });
 
-    // Send the complaints data back as the response
-    return res.status(200).json({complaintsDetails: complaints});
-  } catch (error) {
-    console.error("Error fetching complaints:", error);
-    return res.status(500).send("Error fetching complaints");
-  }
-});
-
-
 // Function to check if a document exists based on
 //  the 'phone' field in 'Customers' collection
+
 exports.checkCustomerExists = functions.https.onRequest(async (req, res) => {
-  try {
-    // Get the phone number from the request body
-    const phoneNumber = req.body.phoneNumber;
+  // Use the CORS middleware
+  cors(req, res, async () => {
+    try {
+      // Get the phone number from the request body
+      const phoneNumber = req.body.phoneNumber;
 
-    // Validate the phone number
-    if (!phoneNumber || phoneNumber.length < 10) {
-      return res.status(400).send("Invalid phone number");
+      // Validate the phone number
+      if (!phoneNumber || phoneNumber.length < 10) {
+        return res.status(400).send("Invalid phone number");
+      }
+
+      // Extract the last 10 digits of the phone number from the request body
+      const last10Digits = phoneNumber.slice(-10);
+      console.log("Searching for customer with phone number: ${last10Digits}");
+
+      // Query all documents from the 'Customers' collection
+      const customersSnapshot = await db.collection("Customers").get();
+
+      // If no documents found, return 404
+      if (customersSnapshot.empty) {
+        console.log("No customers found in the database.");
+        return res.status(404).send("Customer not found");
+      }
+
+      // Iterate through the documents to check
+      // if any 'phone' field ends with the last 10 digits
+      let customerFound = false;
+      customersSnapshot.forEach((doc) => {
+        const customerPhone = doc.data().phone;
+
+        // Check if the last 10 digits of the 'phone' field
+        // match the last 10 digits of the phone number
+        if (customerPhone && customerPhone.slice(-10) === last10Digits) {
+          customerFound = true;
+        }
+      });
+
+      // Return the result based on whether a customer was found or not
+      if (customerFound) {
+        console.log("Customer exists with matching phone number.");
+        return res.status(200).send("Customer exists");
+      } else {
+        console.log("No customer found with matching phone number.");
+        return res.status(404).send("Customer not found");
+      }
+    } catch (error) {
+      console.error("Error checking customer:", error);
+      return res.status(500).send("Error checking customer");
     }
-
-    // Extract the last 10 digits of the phone number
-    const last10Digits = phoneNumber.slice(-10);
-
-    // Query the 'Customers' collection
-    // to check if the 'phone' field ends with the last 10 digits
-    const customersSnapshot = await db.collection("Customers")
-        .where("phone", ">=", last10Digits)
-        .where("phone", "<=", last10Digits + "\uf8ff")
-        .get();
-
-    // If no documents found, return false
-    if (customersSnapshot.empty) {
-      return res.status(404).send("Customer not found");
-    }
-
-    // If document is found, return true
-    return res.status(200).send("Customer exists");
-  } catch (error) {
-    console.error("Error checking customer:", error);
-    return res.status(500).send("Error checking customer");
-  }
+  });
 });
 
 
 // Function to add a new complaint
 //  inside 'Complaints' sub-collection based on phone number
+
 exports.addComplaint = functions.https.onRequest(async (req, res) => {
-  try {
-    // Extract data from the request body
-    const {phone, firstname, lastname, address, city, complaint} = req.body;
+  cors(req, res, async () => {
+    try {
+      // Extract data from the request body
+      const {phone, firstname, lastname, address, city, complaint} = req.body;
 
-    // Validate the phone number
-    if (!phone || phone.length < 10) {
-      return res.status(400).send("Invalid phone number");
+      // Validate the phone number
+      if (!phone || phone.length < 10) {
+        return res.status(400).send("Invalid phone number");
+      }
+
+      // Validate other required fields
+      if (!firstname || !lastname || !address || !city || !complaint) {
+        return res.status(400).send("Missing required fields");
+      }
+
+      // Extract the last 10 digits of the phone number
+      const last10Digits = phone.slice(-10);
+
+      // Query the 'Customers' collection to find the customer
+      // by the last 10 digits of their phone number
+      const customersSnapshot = await admin.firestore()
+          .collection("Customers").get();
+
+      if (customersSnapshot.empty) {
+        return res.status(404).send("Customer not found");
+      }
+
+      let customerFound = false;
+      let customerDoc = null;
+
+      // Iterate through all customers
+      // to find the one with a matching phone number
+      customersSnapshot.forEach((doc) => {
+        const customerPhone = doc.data().phone;
+
+        if (customerPhone && customerPhone.slice(-10) === last10Digits) {
+          customerFound = true;
+          customerDoc = doc;
+        }
+      });
+
+      if (!customerFound || !customerDoc) {
+        return res.status(404).send("Customer not found");
+      }
+
+      // Generate a random 5-digit number for the complaint document ID
+      const complaintDocId = Math
+          .floor(10000 + Math.random() * 90000).toString();
+
+      // Get the current date
+      const currentDate = new Date()
+          .toISOString().split("T")[0]; // Format: YYYY-MM-DD
+
+      // Complaint data to be added
+      const complaintData = {
+        firstname: firstname,
+        lastname: lastname,
+        address: address,
+        city: city,
+        complaint: complaint,
+        complaintdate: currentDate, // Set to current date
+        closingdate: "", // Set empty for now
+        complaintstatus: "Registered", // Initial status
+      };
+
+      // Add the complaint document to the 'Complaints'
+      // sub-collection inside the customer document
+      await customerDoc.ref.collection("Complaints")
+          .doc(complaintDocId).set(complaintData);
+
+      // Return a success response
+      return res.status(200).send("Complaint registered successfully");
+    } catch (error) {
+      console.error("Error adding complaint:", error);
+      return res.status(500).send("Error registering complaint");
     }
-
-    // Validate other required fields
-    if (!firstname || !lastname || !address || !city || !complaint) {
-      return res.status(400).send("Missing required fields");
-    }
-
-    // Extract the last 10 digits of the phone number
-    const last10Digits = phone.slice(-10);
-
-    // Query the 'Customers' collection to find
-    //  the customer by the last 10 digits of their phone number
-    const customersSnapshot = await db.collection("Customers")
-        .where("phone", ">=", last10Digits)
-        .where("phone", "<=", last10Digits + "\uf8ff")
-        .get();
-
-    // If no customer found, return an error
-    if (customersSnapshot.empty) {
-      return res.status(404).send("Customer not found");
-    }
-
-    // Get the customer document ID
-    let customerDocId;
-    customersSnapshot.forEach((doc) => {
-      customerDocId = doc.id;
-    });
-
-    // Generate a random 5-digit number for the complaint document ID
-    const complaintDocId = Math.floor(10000 + Math.random() * 90000).toString();
-
-    // Get the current date
-    const currentDate = new Date().toISOString().split("T")[0];
-    // Format: YYYY-MM-DD
-
-    // Complaint data to be added
-    const complaintData = {
-      firstname: firstname,
-      lastname: lastname,
-      address: address,
-      city: city,
-      complaint: complaint,
-      complaintdate: currentDate, // Set to current date
-      closingdate: "", // Set empty for now
-      complaintstatus: "Registered", // Initial status
-    };
-
-    // Add the complaint document to the
-    //  'Complaints' sub-collection inside the customer document
-    await db.collection("Customers").doc(customerDocId)
-        .collection("Complaints").doc(complaintDocId).set(complaintData);
-
-    // Return a success response
-    return res.status(200).send("Complaint registered successfully");
-  } catch (error) {
-    console.error("Error adding complaint:", error);
-    return res.status(500).send("Error registering complaint");
-  }
+  });
 });
 
 
 // FETCH THE LATEST COMPLAINT
 
+
 exports.getLatestComplaint = functions.https.onRequest(async (req, res) => {
-  if (req.method !== "POST") {
-    return res.status(405).send("Method Not Allowed");
-  }
-
-  const phone = req.body.phone;
-
-  // Validate phone number
-  if (!phone || phone.length < 10) {
-    return res.status(400).send({error: "Phone number is required"});
-  }
-
-  try {
-    // Slice the phone number to the last 10 digits
-    const last10Digits = phone.slice(-10);
-
-    // Query the 'Customers' collection
-    // to find the customer by the last 10 digits of the phone number
-    const customersSnapshot = await db.collection("Customers")
-        .where("phone", ">=", last10Digits)
-        .where("phone", "<=", last10Digits + "\uf8ff")
-        .get();
-
-    // Check if customer was found
-    if (customersSnapshot.empty) {
-      return res.status(404).send({error: "Customer not found"});
+  cors(req, res, async () => {
+    if (req.method !== "POST") {
+      return res.status(405).send("Method Not Allowed");
     }
 
-    // Get the customer document ID
-    let customerDocId;
-    customersSnapshot.forEach((doc) => {
-      customerDocId = doc.id;
-      // Assuming there will be only one matching customer
-    });
+    const phone = req.body.phone;
 
-    // Fetch the latest document from the 'Complaints' sub-collection
-    const complaintsSnapshot = await db.collection("Customers")
-        .doc(customerDocId)
-        .collection("Complaints")
-        .orderBy("complaintdate", "desc")
-        .limit(1) // Get the latest complaint
-        .get();
-
-    // Check if there are any complaints
-    if (complaintsSnapshot.empty) {
-      return res.status(404).send({error: "No complaints found"});
+    // Validate phone number
+    if (!phone || phone.length < 10) {
+      return res.status(400).send({error: "Phone number is required"});
     }
 
-    // Get the latest complaint document and return its full document ID
-    let complaintDocId;
-    complaintsSnapshot.forEach((doc) => {
-      complaintDocId = doc.id;
-    });
+    try {
+      // Slice the phone number to the last 10 digits
+      const last10Digits = phone.slice(-10);
 
-    // Return the full complaint document ID
-    return res.status(200).send({
-      complaintDocId: complaintDocId,
-    });
-  } catch (error) {
-    console.error("Error fetching latest complaint:", error);
-    return res.status(500).send({error: "An error occurred"});
-  }
+      // Query the 'Customers' collection to find the customer
+      // by the last 10 digits of the phone number
+      const customersSnapshot = await admin.firestore()
+          .collection("Customers").get();
+
+      if (customersSnapshot.empty) {
+        return res.status(404).send({error: "Customer not found"});
+      }
+
+      let customerFound = false;
+      let customerDoc = null;
+
+      // Iterate through all customers
+      // to find the one with a matching phone number
+      customersSnapshot.forEach((doc) => {
+        const customerPhone = doc.data().phone;
+
+        if (customerPhone && customerPhone.slice(-10) === last10Digits) {
+          customerFound = true;
+          customerDoc = doc;
+        }
+      });
+
+      if (!customerFound || !customerDoc) {
+        return res.status(404).send({error: "Customer not found"});
+      }
+
+      // Fetch the latest document from the 'Complaints' sub-collection
+      const complaintsSnapshot = await customerDoc.ref
+          .collection("Complaints")
+          .orderBy("complaintdate", "desc")
+          .limit(1) // Get the latest complaint
+          .get();
+
+      // Check if there are any complaints
+      if (complaintsSnapshot.empty) {
+        return res.status(404).send({error: "No complaints found"});
+      }
+
+      // Get the latest complaint document and return its full document ID
+      let complaintDocId;
+      complaintsSnapshot.forEach((doc) => {
+        complaintDocId = doc.id;
+      });
+
+      // Return the full complaint document ID
+      return res.status(200).send({
+        complaintDocId: complaintDocId,
+      });
+    } catch (error) {
+      console.error("Error fetching latest complaint:", error);
+      return res.status(500).send({error: "An error occurred"});
+    }
+  });
 });
+
 
 // Cloud Function for handling Twilio Webhook and sending automated responses
 /* exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
