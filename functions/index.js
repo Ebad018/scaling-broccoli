@@ -7,6 +7,12 @@ const cors = require("cors")({origin: true});
 admin.initializeApp();
 const db = admin.firestore();
 
+// List of phone numbers
+const phoneNumbers = [
+  "+923145353012", // Phone number 1
+  "+923058777434", // Phone number 2
+];
+
 
 // COMMENT ADDED FOR EXTRA SPACE BECAUSE ESLINT IS ANNOYING
 
@@ -17,6 +23,42 @@ const db = admin.firestore();
 
 // CLOUD FUNCTIONS FOR TWILIO
 
+
+// Cloud function to return phone numbers in a round-robin way with CORS support
+exports.getNextPhoneNumber = functions.https.onRequest(async (req, res) => {
+  cors(req, res, async () => {
+    try {
+      // Get the current index from Firestore
+      const docRef = db.collection("RoundRobin").doc("currentIndex");
+      const doc = await docRef.get();
+
+      let currentIndex = 0;
+
+      if (doc.exists) {
+        currentIndex = doc.data().index;
+      } else {
+        // Initialize the index if the document doesn't exist
+        await docRef.set({index: 0});
+      }
+
+      // Get the current recipient phone number based on the index
+      const recipientNumber = phoneNumbers[currentIndex];
+
+      // Update the index for the next number in round-robin
+      currentIndex = (currentIndex + 1) % phoneNumbers.length;
+      // Round-robin logic
+      await docRef.update({index: currentIndex});
+
+      const formattedNumber = recipientNumber.trim();
+
+      // Send the phone number as a response
+      res.status(200).send(formattedNumber);
+    } catch (error) {
+      console.error("Error retrieving phone number:", error);
+      res.status(500).send("Error retrieving phone number");
+    }
+  });
+});
 
 // FUNCTION TO GET WARRANTY DETAILS THROUGH WHATSAPP
 
@@ -120,14 +162,26 @@ exports.registerWarranty = functions.https.onRequest(async (req, res) => {
       devicedetails, deviceserial} = req.body;
 
     // Check if all required fields are provided
-    if (!firstname || !lastname || !phoneNumber ||
-      !devicedetails || !deviceserial) {
+    if (!firstname || !lastname ||
+      !phoneNumber || !devicedetails || !deviceserial) {
       res.status(400).send("All fields are required");
       return;
     }
 
     const last10Digits = phoneNumber.slice(-10);
     // Extract last 10 digits of phone number
+
+    // Function to format date as 'DD-MM-YYYY' with time zone adjustment
+    const formatDate = (date) => {
+      const d = new Date(date);
+      const adjustedDate = new Date(d.getTime() + d
+          .getTimezoneOffset() * 60000);
+      const day = ("0" + adjustedDate.getDate()).slice(-2); // Ensure 2 digits
+      const month = ("0" + (adjustedDate.getMonth() + 1)).slice(-2);
+      // Ensure 2 digits, months are 0-indexed
+      const year = adjustedDate.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
 
     try {
       const customersRef = admin.firestore().collection("Customers");
@@ -161,6 +215,15 @@ exports.registerWarranty = functions.https.onRequest(async (req, res) => {
         // Generate 4-digit random number
         const warrantyID = `${currentYear}SAB-000${randomFourDigits}`;
 
+        // Get current date and ending date (1 year after current date)
+        const startDateObject = new Date();
+        const endingDateObject = new Date(startDateObject);
+        endingDateObject.setFullYear(endingDateObject.getFullYear() + 1);
+
+        // Format both startdate and endingdate as 'DD-MM-YYYY'
+        const formattedStartDate = formatDate(startDateObject);
+        const formattedEndingDate = formatDate(endingDateObject);
+
         // Add new warranty to the sub-collection
         await warrantiesRef.doc(warrantyID).set({
           firstname: firstname,
@@ -168,9 +231,9 @@ exports.registerWarranty = functions.https.onRequest(async (req, res) => {
           phone: last10Digits, // Store last 10 digits of phone
           devicedetails: devicedetails,
           deviceserial: deviceserial,
-          startdate: new Date(), // Start date is the current date
-          endingdate: new Date(new Date()
-              .setFullYear(new Date().getFullYear() + 1)), // 1-year warranty
+          startdate: formattedStartDate, // Start date formatted as 'DD-MM-YYYY'
+          endingdate: formattedEndingDate,
+          // 1-year warranty ending date formatted as 'DD-MM-YYYY'
         });
 
         // Send response with the warranty ID
@@ -188,6 +251,7 @@ exports.registerWarranty = functions.https.onRequest(async (req, res) => {
     }
   });
 });
+
 
 // GET CUSTOMER COMPLAINT BY PHONE NUMBER THROUGH WHATSAPP
 
@@ -387,6 +451,7 @@ exports.addComplaint = functions.https.onRequest(async (req, res) => {
       const complaintData = {
         firstname: firstname,
         lastname: lastname,
+        phone: "0" + last10Digits,
         address: address,
         city: city,
         complaint: complaint,
@@ -645,6 +710,18 @@ exports.addCustomer = functions.https.onRequest((req, res) => {
       return;
     }
 
+    // Function to format date as 'DD-MM-YYYY' with time zone adjustment
+    const formatDate = (date) => {
+      const d = new Date(date);
+      const adjustedDate = new Date(d.getTime() + d
+          .getTimezoneOffset() * 60000);
+      const day = ("0" + adjustedDate.getDate()).slice(-2); // Ensure 2 digits
+      const month = ("0" + (adjustedDate.getMonth() + 1)).slice(-2);
+      // Ensure 2 digits, months are 0-indexed
+      const year = adjustedDate.getFullYear();
+      return `${day}-${month}-${year}`;
+    };
+
     // Check if the phone or email already exists in Firestore
     const customersRef = db.collection("Customers");
     const emailQuery = customersRef.where("email", "==", email);
@@ -658,9 +735,13 @@ exports.addCustomer = functions.https.onRequest((req, res) => {
           }
 
           if (!phoneSnapshot.empty) {
-            res.status(400).send("A customer already exists.");
+            res.status(400).send("A customer with this phone already exists.");
             return;
           }
+
+          // Get the current timestamp and format it
+          const currentDate = new Date();
+          const formattedCreatedAt = formatDate(currentDate);
 
           // Add customer to Firestore if no conflicts
           return customersRef.add({
@@ -670,7 +751,7 @@ exports.addCustomer = functions.https.onRequest((req, res) => {
             phone,
             address,
             city,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: formattedCreatedAt, // Formatted 'createdAt' field
           });
         })
         .then(() => {
@@ -699,7 +780,7 @@ exports.getCustomersData = functions.https.onRequest(async (req, res) => {
           email: doc.data().email,
           address: doc.data().address,
           city: doc.data().city,
-          createdAt: doc.data().createdAt.toDate(),
+          createdAt: doc.data().createdAt,
         };
       });
 
@@ -828,12 +909,27 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
 
       // Check if all required fields are provided
       if (!firstname || !lastname || !phone ||
-         !email || !startdate || !devicedetails || !deviceserial) {
+        !email || !startdate || !devicedetails || !deviceserial) {
         return res.status(400).send("Missing required fields");
       }
 
+      // Function to format date as 'DD-MM-YYYY' with time zone adjustment
+      const formatDate = (date) => {
+        const d = new Date(date);
+        const adjustedDate = new Date(d.getTime() + d
+            .getTimezoneOffset() * 60000);
+        // Adjust for timezone offset
+        const day = ("0" + adjustedDate.getDate()).slice(-2);
+        // Ensure 2 digits
+        const month = ("0" + (adjustedDate
+            .getMonth() + 1)).slice(-2);
+        // Ensure 2 digits, months are 0-indexed
+        const year = adjustedDate.getFullYear();
+        return `${day}-${month}-${year}`;
+      };
+
       // Check if the 'Customers' collection
-      //  contains a document with the provided email
+      // contains a document with the provided email
       const customerDocRef = admin.firestore()
           .collection("Customers").where("email", "==", email);
       const customerSnapshot = await customerDocRef.get();
@@ -847,12 +943,20 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
         const currentYear = new Date().getFullYear();
         const warrantyId = `${currentYear}SAB-000${generateUniqueId()}`;
 
-        // Calculate the ending date (1 year after start date)
+        // Create a copy of the startdate object
+        // to calculate the ending date (1 year after start date)
         const startDateObject = new Date(startdate);
-        const endingDate = new Date(startDateObject
-            .setFullYear(startDateObject.getFullYear() + 1));
+        const endingDateObject = new Date(startDateObject);
+        // Create a copy of the startDateObject
+        endingDateObject.setFullYear(endingDateObject.getFullYear() + 1);
 
-        // Create a new 'Warranties' subcollection underthe 'Customers' document
+        // Format both startdate and endingdate
+        // as 'DD-MM-YYYY' with time zone adjustment
+        const formattedStartDate = formatDate(startDateObject);
+        const formattedEndingDate = formatDate(endingDateObject);
+
+        // Create a new 'Warranties' subcollection
+        // under the 'Customers' document
         const warrantyDocRef = admin.firestore()
             .collection("Customers")
             .doc(customerId)
@@ -865,14 +969,14 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
           lastname,
           phone,
           email,
-          startdate,
-          endingdate: endingDate,
+          startdate: formattedStartDate,
+          endingdate: formattedEndingDate,
           devicedetails,
           deviceserial,
         });
 
-        return res.status(200)
-            .send({status: "success", message: "Warranty document created"});
+        return res.status(200).send({status: "success",
+          message: "Warranty document created"});
       } else {
         return res.status(404).send({status: "error",
           message: "Customer not found"});
@@ -884,6 +988,7 @@ exports.handleWarrantyFormSubmit = functions.https.onRequest((req, res) => {
     }
   });
 });
+
 
 // Helper function to generate unique number for the warranty ID
 /**
@@ -961,6 +1066,21 @@ exports.handleComplaintFormSubmit = functions.https.onRequest((req, res) => {
         return res.status(400).send("Missing required fields");
       }
 
+      // Function to format date as 'DD-MM-YYYY' with time zone adjustment
+      const formatDate = (date) => {
+        const d = new Date(date);
+        const adjustedDate = new Date(d.getTime() + d
+            .getTimezoneOffset() * 60000);
+        // Adjust for timezone offset
+        const day = ("0" + adjustedDate.getDate()).slice(-2);
+        // Ensure 2 digits
+        const month = ("0" + (adjustedDate
+            .getMonth() + 1)).slice(-2);
+        // Ensure 2 digits, months are 0-indexed
+        const year = adjustedDate.getFullYear();
+        return `${day}-${month}-${year}`;
+      };
+
       // Check if the 'Customers' collection
       // contains a document with the provided email
       const customerDocRef = admin.firestore()
@@ -978,6 +1098,7 @@ exports.handleComplaintFormSubmit = functions.https.onRequest((req, res) => {
 
         // Get current date for complaint date
         const complaintDate = new Date();
+        const formattedComplaintDate = formatDate(complaintDate);
 
         // Set default values for complaint status and closing date
         const complaintStatus = "Registered";
@@ -1000,7 +1121,7 @@ exports.handleComplaintFormSubmit = functions.https.onRequest((req, res) => {
           city,
           address,
           complaint,
-          complaindate: complaintDate,
+          complaintdate: formattedComplaintDate,
           complaintstatus: complaintStatus,
           closingdate: closingDate,
         });
@@ -1046,21 +1167,20 @@ exports.getAllCustomerComplaints = functions.https
 
               // Convert Firestore timestamp to JavaScript Date
               // for 'complaintdate' if it exists
-              const complaintDate = complaintData.complaindate &&
-              complaintData.complaindate._seconds ?
-              new Date(complaintData.complaindate._seconds * 1000):
-              null;
+              // const complaintDate = complaintData.complaintdate; &&
+              // complaintData.complaintdate._seconds ?
+              // new Date(complaintData.complaintdate._seconds * 1000):
+              // null;
 
               // 'closingdate' is likely already a string or null,
               // so handle it directly
-              const closingDate = complaintData.closingdate || null;
+              // const closingDate = complaintData.closingdate || null;
 
               return {
                 id: complaintDoc.id, // Include complaint document ID
                 ...complaintData,
-                complaintdate: complaintDate ? complaintDate
-                    .toLocaleDateString() : null, // Format date if available
-                closingdate: closingDate, // Keep closing date as-is
+                // complaintdate: complaintdate,
+                // closingdate: closingDate, // Keep closing date as-is
               };
             });
 

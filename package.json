@@ -8,6 +8,7 @@
     "firebase-admin": "^13.0.2",
     "firebase-functions": "^6.2.0",
     "firebase-tools": "^13.31.1",
-    "git": "^0.1.5"
+    "git": "^0.1.5",
+    "twilio": "^5.4.5"
   }
 }
