@@ -439,6 +439,18 @@ exports.addComplaint = functions.https.onRequest(async (req, res) => {
         return res.status(404).send("Customer not found");
       }
 
+      // Function to format date as 'DD-MM-YYYY' with time zone adjustment
+      const formatDate = (date) => {
+        const d = new Date(date);
+        const adjustedDate = new Date(d.getTime() + d
+            .getTimezoneOffset() * 60000);
+        const day = ("0" + adjustedDate.getDate()).slice(-2); // Ensure 2 digits
+        const month = ("0" + (adjustedDate.getMonth() + 1)).slice(-2);
+        // Ensure 2 digits, months are 0-indexed
+        const year = adjustedDate.getFullYear();
+        return `${day}-${month}-${year}`;
+      };
+
       // Generate a random 5-digit number for the complaint document ID
       const complaintDocId = Math
           .floor(10000 + Math.random() * 90000).toString();
@@ -446,6 +458,8 @@ exports.addComplaint = functions.https.onRequest(async (req, res) => {
       // Get the current date
       const currentDate = new Date()
           .toISOString().split("T")[0]; // Format: YYYY-MM-DD
+
+      const formattedDate = formatDate(currentDate);
 
       // Complaint data to be added
       const complaintData = {
@@ -455,7 +469,7 @@ exports.addComplaint = functions.https.onRequest(async (req, res) => {
         address: address,
         city: city,
         complaint: complaint,
-        complaintdate: currentDate, // Set to current date
+        complaintdate: formattedDate, // Set to current date
         closingdate: "", // Set empty for now
         complaintstatus: "Registered", // Initial status
       };
