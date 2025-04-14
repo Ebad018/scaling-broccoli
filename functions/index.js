@@ -2701,3 +2701,122 @@ exports.getLatestComplaintSabro = functions
         }
       });
     });
+
+
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+// FUNCTIONS FOR QUALITY ASSURANCE
+const cards = ["2H", "20", "27"];
+const compressors = ["40", "46", "R44", "25", "20"];
+const software = ["S00"];
+const models = ["CDR-18-I", "CDR-9", "CDR-12", "CDR-24-I", "CDR-45-I"];
+const months = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+
+exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
+  cors(req, res, async () => {
+    try {
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed");
+      }
+
+      const {quantity, model, card, compressor, sw} = req.body;
+
+      if (!quantity || !model || !card || !compressor || !sw) {
+        return res.status(400).send("Missing required fields");
+      }
+
+      if (isNaN(quantity) || quantity <= 0) {
+        return res.status(400).send("Invalid quantity");
+      }
+
+      if (!models.includes(model)) {
+        return res.status(400).send("Invalid model");
+      }
+
+      if (!cards.includes(card)) {
+        return res.status(400).send("Invalid card");
+      }
+
+      if (!compressors.includes(compressor)) {
+        return res.status(400).send("Invalid compressor");
+      }
+
+      if (!software.includes(sw)) {
+        return res.status(400).send("Invalid software");
+      }
+
+      const now = new Date();
+      const currentYear = now.getFullYear().toString().slice(-2);
+      const currentMonth = now.getMonth() + 1;
+      const currentDay = String(now.getDate()).padStart(2, "0");
+
+      const selectedMonth = months[currentMonth - 1];
+      if (!selectedMonth) {
+        return res.status(400).send("Invalid month");
+      }
+
+      // Fetch all 4-digit suffixes already used across all models
+      const outdoorUnitsSnapshot = await admin.firestore()
+          .collection("Outdoor Units").get();
+      const usedNumbers = new Set();
+
+      for (const modelDoc of outdoorUnitsSnapshot.docs) {
+        const subcollections = await admin.firestore()
+            .collection("Outdoor Units").doc(modelDoc.id).listCollections();
+        for (const subCol of subcollections) {
+          const match = subCol.id.match(/-(\d{4})$/);
+          if (match) {
+            usedNumbers.add(match[1]);
+          }
+        }
+      }
+
+      // Generate serial numbers
+      const generatedSerials = [];
+      let counter = 1;
+
+      while (generatedSerials.length < quantity) {
+        const padded = String(counter).padStart(4, "0");
+        if (!usedNumbers.has(padded)) {
+          const serial = `${selectedMonth}${card}${compressor}
+          -${sw}${currentYear}${currentDay}-${padded}`;
+          generatedSerials.push(serial);
+        }
+        counter++;
+      }
+
+      // Save each serial number as a collection with '
+      // info' document inside the selected model document
+      for (const serial of generatedSerials) {
+        await admin.firestore()
+            .collection("Outdoor Units")
+            .doc(model)
+            .collection(serial)
+            .doc("info")
+            .set({
+              model,
+              card,
+              compressor,
+              software: sw,
+              serial,
+              createdAt: admin.firestore.Timestamp.now(),
+            });
+      }
+
+      return res.status(200).json({success: true, generatedSerials});
+    } catch (error) {
+      console.error("Error generating serial numbers:", error);
+      return res.status(500).send("Internal Server Error");
+    }
+  });
+});
+
