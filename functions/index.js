@@ -2720,6 +2720,7 @@ const compressors = ["40", "46", "R44", "25", "20"];
 const software = ["S00"];
 const models = ["CDR-18-I", "CDR-9", "CDR-12", "CDR-24-I", "CDR-45-I"];
 const months = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+const manufacturers = ["Sabro", "Elios"];
 
 exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
   cors(req, res, async () => {
@@ -2728,9 +2729,9 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
         return res.status(405).send("Method Not Allowed");
       }
 
-      const {quantity, model, card, compressor, sw} = req.body;
+      const {quantity, model, card, compressor, sw, manufacturer} = req.body;
 
-      if (!quantity || !model || !card || !compressor || !sw) {
+      if (!quantity || !model || !card || !compressor || !sw || !manufacturer) {
         return res.status(400).send("Missing required fields");
       }
 
@@ -2752,6 +2753,10 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
 
       if (!software.includes(sw)) {
         return res.status(400).send("Invalid software");
+      }
+
+      if (!manufacturers.includes(manufacturer)) {
+        return res.status(400).send("Invalid manufacturer");
       }
 
       const now = new Date();
@@ -2809,6 +2814,7 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
               software: sw,
               serial,
               createdAt: admin.firestore.Timestamp.now(),
+              manufacturer,
             });
       }
 
