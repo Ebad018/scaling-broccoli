@@ -2715,10 +2715,12 @@ exports.getLatestComplaintSabro = functions
 //
 //
 // FUNCTIONS FOR QUALITY ASSURANCE
-const cards = ["2H", "20", "27"];
-const compressors = ["40", "46", "R44", "25", "20"];
-const software = ["S00"];
-const models = ["CDR-18-I", "CDR-9", "CDR-12", "CDR-24-I", "CDR-45-I"];
+const cards = ["2H", "20", "27", "00"];
+const compressors = ["40", "46", "44", "25", "20"];
+const outdoorSoftware = ["0", "1", "2", "3", "4"];
+const indoorSoftware = ["E10", "S10"];
+const outdoorModels =["CDR-18-I", "CDR-10", "CDR-13-I", "CDR-24-I", "CDR-48-I"];
+const indoorModels = ["ESR-18-I", "ESR-13-I", "ESR-10", "ESR-24-I", "ESR-48-I"];
 const months = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 const manufacturers = ["Sabro", "Elios"];
 
@@ -2729,9 +2731,11 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
         return res.status(405).send("Method Not Allowed");
       }
 
-      const {quantity, model, card, compressor, sw, manufacturer} = req.body;
+      const {quantity, model, card, compressor, sw, manufacturer,
+        generatedBy} = req.body;
 
-      if (!quantity || !model || !card || !compressor || !sw || !manufacturer) {
+      if (!quantity || !model || !card || !compressor || !sw || !manufacturer ||
+         !generatedBy) {
         return res.status(400).send("Missing required fields");
       }
 
@@ -2739,7 +2743,7 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
         return res.status(400).send("Invalid quantity");
       }
 
-      if (!models.includes(model)) {
+      if (!outdoorModels.includes(model)) {
         return res.status(400).send("Invalid model");
       }
 
@@ -2751,7 +2755,7 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
         return res.status(400).send("Invalid compressor");
       }
 
-      if (!software.includes(sw)) {
+      if (!outdoorSoftware.includes(sw)) {
         return res.status(400).send("Invalid software");
       }
 
@@ -2792,8 +2796,8 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
       while (generatedSerials.length < quantity) {
         const padded = String(counter).padStart(4, "0");
         if (!usedNumbers.has(padded)) {
-          const serial = `${selectedMonth}${card}${compressor}
-          -${sw}${currentYear}${currentDay}-${padded}`;
+          const serial = `${selectedMonth}${currentYear}${currentDay}
+          -${sw}${card}${compressor}-${padded}`;
           generatedSerials.push(serial);
         }
         counter++;
@@ -2815,6 +2819,7 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
               serial,
               createdAt: admin.firestore.Timestamp.now(),
               manufacturer,
+              generatedBy,
             });
       }
 
@@ -2826,3 +2831,106 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
   });
 });
 
+exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
+  cors(req, res, async () => {
+    try {
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed");
+      }
+
+      const {quantity, model, compressor, card, sw,
+        manufacturer, generatedBy} = req.body;
+
+      if (!quantity || !model || !compressor || !card || !sw || !manufacturer ||
+         !generatedBy) {
+        return res.status(400).send("Missing Required Fields");
+      }
+
+      if (isNaN(quantity) || quantity <= 0) {
+        return res.status(400).send("Invalid Quantity");
+      }
+
+      if (!indoorModels.includes(model)) {
+        return res.status(400).send("Invalid Model");
+      }
+
+      if (!compressors.includes(compressor)) {
+        return res.status(400).send("Invalid Compressor");
+      }
+
+      if (!cards.includes(card)) {
+        return res.status(400).send("invalid Card");
+      }
+
+      if (!indoorSoftware.includes(sw)) {
+        return res.status(400).send("Invalid Software");
+      }
+
+      if (!manufacturers.includes(manufacturer)) {
+        return res.status(400).send("Invalid Manufacturer");
+      }
+
+      const now = new Date();
+      const currentYear = now.getFullYear().toString().slice(-2);
+      const currentMonth = now.getMonth() +1;
+      const currentDay = String(now.getDate()).padStart(2, "0");
+
+      const selectedMonth = months[currentMonth - 1];
+      if (!selectedMonth) {
+        return res.status(400).send("Invalid Month");
+      }
+
+      const indoorUnitsSnapshot = await admin.firestore()
+          .collection("Indoor Units").get();
+
+      const usedNumbers = new Set();
+
+      for (const modelDoc of indoorUnitsSnapshot.docs) {
+        const subcollections = await admin.firestore()
+            .collection("Indoor Units").doc(modelDoc.id).listCollections();
+        for (const subCol of subcollections) {
+          const match = subCol.id.match(/-(\d{4})$/);
+          if (match) {
+            usedNumbers.add(match[1]);
+          }
+        }
+      }
+
+      const generatedSerials = [];
+      let counter = 1;
+
+      while (generatedSerials.length < quantity) {
+        const padded = String(counter).padStart(4, "0");
+        if (!usedNumbers.has(padded)) {
+          const serial = `${selectedMonth}${currentYear}${currentDay}
+          -${sw}${compressor}-${padded}`;
+          generatedSerials.push(serial);
+        }
+        counter++;
+      }
+
+      for (const serial of generatedSerials) {
+        await admin.firestore()
+            .collection("Indoor Units")
+            .doc(model)
+            .collection(serial)
+            .doc("info")
+            .set({
+              model,
+              card,
+              compressor,
+              software: sw,
+              serial,
+              createdAt: admin.firestore.Timestamp.now(),
+              manufacturer,
+              generatedBy,
+            });
+      }
+
+      return res.status(200).json({success: true, generatedSerials});
+    } catch (error) {
+      console.error("Error generating serial number:", error);
+      return res.status(500).send("internal Server Error");
+    }
+  });
+});
