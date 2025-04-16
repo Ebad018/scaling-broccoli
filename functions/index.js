@@ -122,8 +122,8 @@ exports.getWarrantyDetails = functions.https.onRequest(async (req, res) => {
       // Format each warranty document data
       const warrantyDetails = warrantiesSnapshot.docs.map((doc) => ({
         id: doc.id,
-        startdate: formatTimestamp(doc.data().startdate), // Format startdate
-        endingdate: formatTimestamp(doc.data().endingdate), // Format endingdate
+        startdate: doc.data().startdate, // Format startdate
+        endingdate: doc.data().endingdate, // Format endingdate
         devicedetails: doc.data().devicedetails,
       }));
 
