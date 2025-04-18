@@ -2901,9 +2901,10 @@ exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
 
       while (generatedSerials.length < quantity) {
         const padded = String(counter).padStart(4, "0");
+        const randomLetters = getTwoRandomCapitalLetters();
         if (!usedNumbers.has(padded)) {
           const serial = `${selectedMonth}${currentYear}${currentDay}
-          -${sw}${compressor}-${padded}`;
+          -${sw}${compressor}-${randomLetters}${padded}`;
           generatedSerials.push(serial);
         }
         counter++;
@@ -2934,3 +2935,20 @@ exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
     }
   });
 });
+
+/**
+ * Returns a string of 2 random uppercase letters from the English alphabet.
+ * Useful for generating short random codes or identifiers.
+ *
+ * @return {string} Two random capital letters (e.g., "AB", "ZX")
+ */
+function getTwoRandomCapitalLetters() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let result = "";
+  for (let i = 0; i < 2; i++) {
+    const randomIndex = Math.floor(Math.random() * alphabet.length);
+    result += alphabet[randomIndex];
+  }
+
+  return result;
+}
