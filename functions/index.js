@@ -2719,8 +2719,10 @@ const cards = ["2H", "20", "27", "00"];
 const compressors = ["40", "46", "44", "25", "20"];
 const outdoorSoftware = ["0", "1", "2", "3", "4"];
 const indoorSoftware = ["E10", "S10"];
-const outdoorModels =["CDR-18-I", "CDR-10", "CDR-13-I", "CDR-24-I", "CDR-48-I"];
-const indoorModels = ["ESR-18-I", "ESR-13-I", "ESR-10", "ESR-24-I", "ESR-48-I"];
+const outdoorModels =["CDR-18-I", "CDR-18-LI", "CDR-10", "CDR-13-I",
+  "CDR-24-I", "CDR-24-LI", "CDR-48-I"];
+const indoorModels = ["ESR-18-I", "ESR-18-LI", "ESR-13-I",
+  "ESR-10", "ESR-24-I", "ESR-24-LI", "ESR-48-I"];
 const months = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 const manufacturers = ["Sabro", "Elios"];
 
