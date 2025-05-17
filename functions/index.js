@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const cors = require("cors")({origin: true});
+const {getStorage} = require("firebase-admin/storage");
 // const bodyParser = require("body-parser");
 
 // Initialize Firebase Admin SDK
@@ -2725,6 +2726,7 @@ const indoorModels = ["ESR-18-I", "ESR-18-LI", "ESR-13-I",
   "ESR-10", "ESR-24-I", "ESR-24-LI", "ESR-48-I"];
 const months = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 const manufacturers = ["Sabro", "Elios"];
+const cities = ["Faisalabad", "Lahore", "Islamabad", "Peshawar", "Karachi"];
 
 exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
   cors(req, res, async () => {
@@ -2734,10 +2736,10 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
       }
 
       const {quantity, model, card, compressor, sw, manufacturer,
-        generatedBy} = req.body;
+        generatedBy, city} = req.body;
 
       if (!quantity || !model || !card || !compressor || !sw || !manufacturer ||
-         !generatedBy) {
+         !generatedBy || !city) {
         return res.status(400).send("Missing required fields");
       }
 
@@ -2763,6 +2765,10 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
 
       if (!manufacturers.includes(manufacturer)) {
         return res.status(400).send("Invalid manufacturer");
+      }
+
+      if (!cities.includes(city)) {
+        return res.status(400).send("Invalid City");
       }
 
       const now = new Date();
@@ -2822,6 +2828,7 @@ exports.generateOutdoorSerials = functions.https.onRequest(async (req, res) => {
               createdAt: admin.firestore.Timestamp.now(),
               manufacturer,
               generatedBy,
+              city,
             });
       }
 
@@ -2841,10 +2848,11 @@ exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
       }
 
       const {quantity, model, compressor, card, sw,
-        manufacturer, generatedBy} = req.body;
+        manufacturer, generatedBy, city} = req.body;
 
-      if (!quantity || !model || !compressor || !card || !sw || !manufacturer ||
-         !generatedBy) {
+      // Validate input
+      if (!quantity || !model || !compressor || !card ||
+        !sw || !manufacturer || !generatedBy || !city) {
         return res.status(400).send("Missing Required Fields");
       }
 
@@ -2861,7 +2869,7 @@ exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
       }
 
       if (!cards.includes(card)) {
-        return res.status(400).send("invalid Card");
+        return res.status(400).send("Invalid Card");
       }
 
       if (!indoorSoftware.includes(sw)) {
@@ -2872,47 +2880,44 @@ exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
         return res.status(400).send("Invalid Manufacturer");
       }
 
+      if (!cities.includes(city)) {
+        return res.status(400).send("Invalid City");
+      }
+
+      // Prepare date parts
       const now = new Date();
       const currentYear = now.getFullYear().toString().slice(-2);
-      const currentMonth = now.getMonth() +1;
+      const currentMonth = now.getMonth() + 1;
       const currentDay = String(now.getDate()).padStart(2, "0");
-
       const selectedMonth = months[currentMonth - 1];
+
       if (!selectedMonth) {
         return res.status(400).send("Invalid Month");
       }
 
-      const indoorUnitsSnapshot = await admin.firestore()
-          .collection("Indoor Units").get();
+      // Get last used number from SerialCounters/indoor
+      const counterRef = admin.firestore().collection("SerialCounters")
+          .doc("indoor");
+      const counterDoc = await counterRef.get();
 
-      const usedNumbers = new Set();
-
-      for (const modelDoc of indoorUnitsSnapshot.docs) {
-        const subcollections = await admin.firestore()
-            .collection("Indoor Units").doc(modelDoc.id).listCollections();
-        for (const subCol of subcollections) {
-          const match = subCol.id.match(/-(\d{4})$/);
-          if (match) {
-            usedNumbers.add(match[1]);
-          }
-        }
+      let counter = 30; // Default first-time start
+      if (counterDoc.exists && typeof counterDoc.data().lastUsed === "number") {
+        counter = counterDoc.data().lastUsed + 1;
       }
 
       const generatedSerials = [];
-      let counter = 1;
 
-      while (generatedSerials.length < quantity) {
+      for (let i = 0; i < quantity; i++) {
         const padded = String(counter).padStart(4, "0");
         const randomLetters = getTwoRandomCapitalLetters();
-        if (!usedNumbers.has(padded)) {
-          const serial = `${selectedMonth}${currentYear}${currentDay}
-          -${sw}${compressor}-${randomLetters}${padded}`;
-          generatedSerials.push(serial);
-        }
+        const serial = `${selectedMonth}${currentYear}${currentDay}-${sw}
+        ${compressor}-${randomLetters}${padded}`;
+        generatedSerials.push({serial, padded});
         counter++;
       }
 
-      for (const serial of generatedSerials) {
+      // Save serials to Firestore
+      for (const {serial} of generatedSerials) {
         await admin.firestore()
             .collection("Indoor Units")
             .doc(model)
@@ -2927,13 +2932,19 @@ exports.generateIndoorSerials = functions.https.onRequest(async (req, res) => {
               createdAt: admin.firestore.Timestamp.now(),
               manufacturer,
               generatedBy,
+              city,
             });
       }
 
-      return res.status(200).json({success: true, generatedSerials});
+      // Update lastUsed to latest counter
+      await counterRef.set({lastUsed: counter - 1}, {merge: true});
+
+      const serialStrings = generatedSerials.map((s) => s.serial);
+      return res.status(200)
+          .json({success: true, generatedSerials: serialStrings});
     } catch (error) {
-      console.error("Error generating serial number:", error);
-      return res.status(500).send("internal Server Error");
+      console.error("Error generating serial numbers:", error);
+      return res.status(500).send("Internal Server Error");
     }
   });
 });
@@ -2953,4 +2964,119 @@ function getTwoRandomCapitalLetters() {
   }
 
   return result;
+}
+
+
+exports.readStringFromFirestore = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      // Hardcoded values
+      const collectionPath = "OTA Files";
+      const documentId = "ng28VOphfMUn4mDlWZcX";
+      const fieldName = "access token";
+
+      // Reference the document
+      const docRef = admin.firestore().collection(collectionPath)
+          .doc(documentId);
+      const docSnapshot = await docRef.get();
+
+      if (!docSnapshot.exists) {
+        return res.status(404).send("Document not found.");
+      }
+
+      const data = docSnapshot.data();
+      const result = data[fieldName];
+
+      if (typeof result === "string") {
+        return res.status(200).send(result);
+      } else {
+        return res.status(400).send("Field is not a string or does not exist.");
+      }
+    } catch (error) {
+      console.error("Error reading from Firestore:", error);
+      return res.status(500).send("Internal Server Error.");
+    }
+  });
+});
+
+exports.getLatestFirmware = functions.https.onRequest((req, res) => {
+  cors(req, res, async () => {
+    try {
+      const bucket = getStorage().bucket();
+      const folder = "elios_lcd_firmware/";
+
+      // List files in the folder
+      const [files] = await bucket.getFiles({prefix: folder});
+
+      // Filter files that match the version pattern
+      const versionFiles = files
+          .map((file) => {
+            const match = file.name.match(/version-([\d.]+)\.bin$/);
+            if (match) {
+              return {
+                file,
+                version: match[1],
+              };
+            }
+            return null;
+          })
+          .filter((f) => f !== null);
+
+      if (versionFiles.length === 0) {
+        return res.status(404).send("No firmware files found.");
+      }
+
+      // Sort files by version number (simple numeric compare)
+      versionFiles.sort((a, b) => {
+        return compareVersions(b.version, a.version); // Descending order
+      });
+
+      const latest = versionFiles[0];
+
+      // Get download URL
+      const [metadata] = await latest.file.getMetadata();
+      let downloadUrl;
+
+      if (metadata.metadata && metadata
+          .metadata.firebaseStorageDownloadTokens) {
+        const token = metadata.metadata.firebaseStorageDownloadTokens;
+        downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(latest.file.name)}?alt=media&token=${token}`;
+      } else {
+        // Generate a new token if not exists (optional,
+        // requires proper IAM permissions)
+        // This block assumes the file is public if no token exists
+        downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(latest.file.name)}?alt=media`;
+      }
+
+      return res.status(200).json({
+        version: latest.version,
+        url: downloadUrl,
+      });
+    } catch (error) {
+      console.error("Error fetching firmware:", error);
+      return res.status(500).send("Internal Server Error.");
+    }
+  });
+});
+
+/**
+ * Compares two semantic version strings (e.g., '1.1' vs '1.2').
+ * Supports multiple segments (e.g., '1.2.3').
+ *
+ * @param {string} v1 - Version string 1.
+ * @param {string} v2 - Version string 2.
+ * @return {number} - 1 if v1 > v2, -1 if v1 < v2, 0 if equal.
+ */
+function compareVersions(v1, v2) {
+  const v1parts = v1.split(".").map(Number);
+  const v2parts = v2.split(".").map(Number);
+  const len = Math.max(v1parts.length, v2parts.length);
+
+  for (let i = 0; i < len; i++) {
+    const a = v1parts[i] || 0;
+    const b = v2parts[i] || 0;
+    if (a > b) return 1;
+    if (a < b) return -1;
+  }
+  return 0;
 }
